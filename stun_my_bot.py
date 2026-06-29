@@ -1,21 +1,8 @@
 import sys
-import subprocess
 import time
 from pathlib import Path
 
 
-def ensure_packages():
-    """Auto-install minimal dependencies used by the framework."""
-    required = ["pyzmq", "loguru", "json5", "pywin32"]
-    uv_exe = Path(__file__).parent.parent / "uv" / "uv.exe"
-    for pkg in required:
-        try:
-            __import__(pkg)
-        except ImportError:
-            subprocess.check_call([str(uv_exe), "pip", "install", pkg, "-q"])
-
-
-ensure_packages()
 
 # Add project root to sys.path
 root_dir = str(Path(__file__).parent.parent.absolute())
