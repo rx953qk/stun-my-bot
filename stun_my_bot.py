@@ -34,7 +34,7 @@ from jduel_bot.jduel_bot_enums import (
     CardTurn,
 )
 from jduel_bot.jduel_bot_handler import JDuelBotHandler
-from jduel_bot.jduel_bot_logger import LoggerManager, get_log_filename
+from jduel_bot.jduel_bot_logger import LoggerManager, get_log_path
 
 
 COMMAND_BIT_TO_TYPE = {
@@ -1522,7 +1522,7 @@ self.first_card_activation_coordinates = {"YES": Coordinates(741, 425), "NO": Co
 if __name__ == "__main__":
     # Reset log file (truncate) on each run for easier reading from start
     import os
-    _log_path = get_log_filename(__file__)
+    _log_path = get_log_path(__file__)
     if os.path.isfile(_log_path):
         with open(_log_path, "w", encoding="utf-8") as _f:
             _f.write("")
