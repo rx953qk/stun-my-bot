@@ -640,6 +640,12 @@ class LockdownStunBotHandler(JDuelBotHandler):
             self.logger.warning(f"[Super Poly] Fusion prompt handle failed: {e}")
             return False
 
+    def _reset_game_state(self):
+        """Reset all per-game state. Call at the start of each new duel (turn 1) to prevent carry-over."""
+        self._super_poly_cost_pending_until = 0.0
+        self._super_poly_stage = "none"
+        self._unending_prompt_pending_until = 0.0
+
     def _try_flip_my_facedown_monsters(self) -> None:
         """Before Battle: if our monsters are face-down, try to flip them if game allows (CommandBit.Reverse)."""
         try:
@@ -1095,11 +1101,19 @@ class LockdownStunBotHandler(JDuelBotHandler):
                 return
             cards = self.duel_bot_client.get_dialog_card_list()
             if len(cards) != 3:
-                self.logger.warning(f"[Pot of Duality] Dialog does not have 3 cards: {len(cards)} -> {cards}")
-                return
-            best = max(cards, key=lambda c: HAND_PRIORITY.get(str(c), 0))
-            idx = cards.index(best) if best in cards else 0
-            self.logger.info(f"[Pot of Duality] Pick 1/3 from dialog -> '{best}' (index={idx})")
+                # Dialog may not have loaded yet — retry once with a longer wait.
+                self.logger.warning(f"[Pot of Duality] Got {len(cards)} cards on first try, retrying...")
+                time.sleep(0.8)
+                if not self.duel_bot_client.is_inputting():
+                    return
+                cards = self.duel_bot_client.get_dialog_card_list()
+            if cards:
+                best = max(cards, key=lambda c: HAND_PRIORITY.get(str(c), 0))
+                idx = cards.index(best) if best in cards else 0
+                self.logger.info(f"[Pot of Duality] Pick '{best}' (index={idx}) from {len(cards)} cards")
+            else:
+                idx = 0
+                self.logger.warning("[Pot of Duality] Card list still empty — selecting index 0 as fallback")
             self.duel_bot_client.select_card_from_dialog(
                 CardSelection(card_index=idx),
                 dialog_button_type=DialogButtonType.Middle,
@@ -1264,8 +1278,11 @@ class LockdownStunBotHandler(JDuelBotHandler):
         max_actions = 20
         actions_taken = 0
         failed_actions = set()
+        total_iterations = 0
+        max_total_iterations = 60
         self._log_board_state_detail()
-        while actions_taken < max_actions:
+        while actions_taken < max_actions and total_iterations < max_total_iterations:
+            total_iterations += 1
             self._log_prompt_if_inputting()
             if self._handle_super_poly_discard_prompt():
                 continue
@@ -1280,6 +1297,12 @@ class LockdownStunBotHandler(JDuelBotHandler):
             valid_raw = self._get_all_valid_actions()
             valid = self._filter_set_duplicates(valid_raw)
             valid = [a for a in valid if (a["card_name"], a["command_type"], a["index"], a["position"]) not in failed_actions]
+            # On the very first iteration with no valid actions, wait and retry once
+            # in case the game hasn't finished transitioning to Main Phase yet.
+            if not valid and actions_taken == 0 and total_iterations == 1:
+                self.logger.info("[play_turn] No valid actions on first check — waiting for game to settle.")
+                time.sleep(1.0)
+                continue
             best = self._choose_best_action(valid)
             if best is None:
                 if self.duel_bot_client.is_inputting():
@@ -1314,12 +1337,31 @@ class LockdownStunBotHandler(JDuelBotHandler):
             self._log_prompt_if_inputting()
             if self.duel_bot_client.cancel_activation_prompts():
                 pass
+        if total_iterations >= max_total_iterations:
+            self.logger.warning(f"[play_turn] Hit iteration cap — clearing Super Poly/Unending state.")
+            self._super_poly_stage = "none"
+            self._super_poly_cost_pending_until = 0.0
+            self._unending_prompt_pending_until = 0.0
         self.logger.info(f"Turn complete. Total actions: {actions_taken}")
 
+    def handle_my_draw_phase(self):
+        self.logger.info("Handling draw phase...")
+        # Cancel any blocking prompt before drawing (e.g. Time-Tearing Morganite YES/NO).
+        # Without this, the bot loops every second clicking center while the prompt blocks.
+        if self.duel_bot_client.is_inputting():
+            self.logger.info("[Draw] Prompt detected — cancelling before draw.")
+            self.duel_bot_client.cancel_activation_prompts()
+            time.sleep(0.3)
+        self.duel_bot_client.handle_draw_phase()
+        if self.duel_bot_client.cancel_activation_prompts():
+            self.logger.info("[Draw] Cancelling activation prompts after draw.")
+
     def handle_my_main_phase_1(self):
+        turn = self.duel_bot_client.get_turn_number()
+        if turn == 1:
+            self._reset_game_state()
         self.duel_bot_client.cancel_activation_prompts()
         self.play_turn()
-        turn = self.duel_bot_client.get_turn_number()
         self.duel_bot_client.cancel_activation_prompts()
         time.sleep(0.3)
         if turn == 1:
