@@ -175,8 +175,7 @@ SUPER_POLY_NAME = "Super Polymerization"
 class LockdownStunBotHandler(JDuelBotHandler):
     def __init__(self, duel_bot_client: JDuelBotClient, logger):
         super().__init__(duel_bot_client, logger)
-        self.bamboo_equipped_on_field = False  # Track if a Bamboo Sword equip is on field
-        self.first_card_activation_coordinates = {"YES": Coordinates(741, 425), "NO": Coordinates(541, 425)}
+self.first_card_activation_coordinates = {"YES": Coordinates(741, 425), "NO": Coordinates(541, 425)}
         # Super Polymerization: multi-stage prompt tracking (avoid mis-detect / infinite loop)
         self._super_poly_cost_pending_until = 0.0
         # stages: none | discard | materials | fusion | position | zone (summon zone selection)
