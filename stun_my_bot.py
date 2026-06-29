@@ -90,12 +90,12 @@ HAND_PRIORITY = {
     "Barrier Statue of the Torrent": 180,
     "Banisher of the Radiance": 175,
     "Necrovalley": 150,
-    "Clockwork Night": 160,  # Prefer over TCBOO when both in hand
+    "Clockwork Night": 155,  # Lower than TCBOO when both in hand
     "Super Polymerization": 120,
     "Dimension Shifter": 115,
     "Artifact Lancea": 110,
     "Macro Cosmos": 160,
-    "There Can Be Only One": 155,  # Lower than Clockwork Night (160) when both in hand
+    "There Can Be Only One": 165,  # Prefer TCBOO first when both in hand
     "Solemn Judgment": 105,
     "Solemn Strike": 104,
     "Solemn Warning": 103,
