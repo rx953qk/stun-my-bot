@@ -1335,13 +1335,18 @@ class LockdownStunBotHandler(JDuelBotHandler):
                     self._handle_pot_of_extravagance_dialog()
                     actions_taken += 1
                     continue
-                # Likely "Continue Main Phase?" prompt (not exposed via dialog list, not dismissed
-                # by cancel_activation_prompts()). Click YES while we still have actions to try.
-                if total_iterations <= 2:
-                    self.logger.info(f"[play_turn] No valid actions, prompt active (last_used='{last_used}') — assuming Continue Main Phase? -> YES.")
-                    if self._handle_continue_main_phase_prompt(has_more_to_play=True):
-                        time.sleep(0.3)
-                        continue
+                # Unknown prompt — could be a leftover from draw/standby or "Continue Main Phase?".
+                # At the start of the turn (no actions yet), cancel first so we don't accidentally
+                # advance game state. Only use the YES coordinate click if we have already played
+                # something this turn (actions_taken > 0), which is when "Continue Main Phase?"
+                # legitimately appears mid-turn.
+                if total_iterations <= 3:
+                    if actions_taken > 0:
+                        self.logger.info(f"[play_turn] Prompt after actions (last_used='{last_used}') — assuming Continue Main Phase? -> YES.")
+                        if self._handle_continue_main_phase_prompt(has_more_to_play=True):
+                            time.sleep(0.3)
+                            continue
+                    self.logger.info(f"[play_turn] Prompt at turn start (last_used='{last_used}') — cancelling to clear leftover prompt.")
                     self.duel_bot_client.cancel_activation_prompts()
                     time.sleep(0.5)
                     continue
