@@ -7,11 +7,12 @@ from pathlib import Path
 def ensure_packages():
     """Auto-install minimal dependencies used by the framework."""
     required = ["pyzmq", "loguru", "json5", "pywin32"]
+    uv_exe = Path(__file__).parent.parent / "uv" / "uv.exe"
     for pkg in required:
         try:
             __import__(pkg)
         except ImportError:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", pkg, "-q"])
+            subprocess.check_call([str(uv_exe), "pip", "install", pkg, "-q"])
 
 
 ensure_packages()
