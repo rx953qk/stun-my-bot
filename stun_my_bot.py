@@ -3,7 +3,6 @@ import time
 from pathlib import Path
 
 
-
 # Add project root to sys.path
 root_dir = str(Path(__file__).parent.parent.absolute())
 if root_dir not in sys.path:
@@ -173,7 +172,6 @@ class LockdownStunBotHandler(JDuelBotHandler):
         self._pos_faceup_def = Coordinates(712, 580)
         # Unending Nightmare: only handle YES/NO prompt after we actually activate it (Action)
         self._unending_prompt_pending_until = 0.0
-        
 
 
     # ===== Get all valid actions from the game =====
@@ -1297,9 +1295,31 @@ class LockdownStunBotHandler(JDuelBotHandler):
             valid_raw = self._get_all_valid_actions()
             valid = self._filter_set_duplicates(valid_raw)
             valid = [a for a in valid if (a["card_name"], a["command_type"], a["index"], a["position"]) not in failed_actions]
-            # On the very first iteration with no valid actions, wait and retry once
-            # in case the game hasn't finished transitioning to Main Phase yet.
-            if not valid and actions_taken == 0 and total_iterations == 1:
+            if not valid and self.duel_bot_client.is_inputting():
+                # No valid game actions but a prompt is open. Check last_used to handle known dialogs.
+                last_used = ""
+                try:
+                    last_used = self.duel_bot_client.get_last_used_card_name()
+                except Exception:
+                    pass
+                if last_used == POT_OF_DUALITY_NAME:
+                    self.logger.info("[play_turn] Pot of Duality dialog already open — handling.")
+                    self._handle_pot_of_duality_dialog()
+                    actions_taken += 1
+                    continue
+                if last_used == POT_OF_EXTRAVAGANCE_NAME:
+                    self.logger.info("[play_turn] Pot of Extravagance dialog already open — handling.")
+                    self._handle_pot_of_extravagance_dialog()
+                    actions_taken += 1
+                    continue
+                # Unknown prompt with no valid actions — cancel and retry up to twice.
+                if total_iterations <= 2:
+                    self.logger.info(f"[play_turn] No valid actions, prompt active (last_used='{last_used}') — cancelling and retrying.")
+                    self.duel_bot_client.cancel_activation_prompts()
+                    time.sleep(0.5)
+                    continue
+            elif not valid and actions_taken == 0 and total_iterations == 1:
+                # No prompt, no actions on first check — game may not be ready yet.
                 self.logger.info("[play_turn] No valid actions on first check — waiting for game to settle.")
                 time.sleep(1.0)
                 continue
@@ -1468,10 +1488,6 @@ class LockdownStunBotHandler(JDuelBotHandler):
                     self.duel_bot_client.handle_unexpected_prompts()
                     # Slightly longer delay between attacks so player can see animation.
                     time.sleep(0.8)
-                    # In Battle: if game opens prompt after attack:
-                    # - If chain top is our card -> cancel (do not activate our effect during attack).
-                    # - If chain top is opponent's -> leave it so we can chain negate/respond.
-                    # Always log prompt when present.
                     self._log_prompt_if_inputting()
                     if self.duel_bot_client.is_inputting():
                         top_player, is_monster_effect_chain, ctx_src = self._get_response_context()
@@ -1546,11 +1562,7 @@ class LockdownStunBotHandler(JDuelBotHandler):
         self.duel_bot_client.cancel_activation_prompts()
 
 
-
-
-
 if __name__ == "__main__":
-    # Reset log file (truncate) on each run for easier reading from start
     import os
     _log_path = get_log_path(__file__)
     if os.path.isfile(_log_path):
