@@ -163,6 +163,10 @@ class LockdownStunBotHandler(JDuelBotHandler):
     def __init__(self, duel_bot_client: JDuelBotClient, logger):
         super().__init__(duel_bot_client, logger)
         self.first_card_activation_coordinates = {"YES": Coordinates(741, 425), "NO": Coordinates(541, 425)}
+        # "Continue Main Phase?" Yes/No prompt coordinates (not exposed via get_dialog_card_list()).
+        self._continue_main_phase_coordinates = {"YES": Coordinates(741, 425), "NO": Coordinates(541, 425)}
+        # Surrender immediately if we go second — this deck is a turn-1 setup deck with little value when behind.
+        self.surrender_if_going_second = True
         # Super Polymerization: multi-stage prompt tracking (avoid mis-detect / infinite loop)
         self._super_poly_cost_pending_until = 0.0
         # stages: none | discard | materials | fusion | position | zone (summon zone selection)
@@ -1271,6 +1275,25 @@ class LockdownStunBotHandler(JDuelBotHandler):
             self.logger.warning(f"[Unending Nightmare] Prompt handle failed: {e}")
             return False
 
+    def _handle_continue_main_phase_prompt(self, has_more_to_play: bool) -> bool:
+        """
+        "Continue Main Phase?" Yes/No prompt is not exposed via get_dialog_card_list() and is not
+        dismissed correctly by cancel_activation_prompts() — must click coordinates directly.
+        Click YES if we still want to act this turn, NO to move on to Battle Phase.
+        """
+        try:
+            if not self.duel_bot_client.is_inputting():
+                return False
+            choice = "YES" if has_more_to_play else "NO"
+            self.logger.info(f"[Continue Main Phase?] Clicking {choice}")
+            self.duel_bot_client.simulate_click(self._continue_main_phase_coordinates[choice])
+            time.sleep(0.4)
+            self.duel_bot_client.wait_for_input_enabled()
+            return True
+        except Exception as e:
+            self.logger.warning(f"[Continue Main Phase?] Click failed: {e}")
+            return False
+
     def play_turn(self):
         """Play Main Phase: repeatedly choose and execute best action until none or max iterations."""
         max_actions = 20
@@ -1312,9 +1335,13 @@ class LockdownStunBotHandler(JDuelBotHandler):
                     self._handle_pot_of_extravagance_dialog()
                     actions_taken += 1
                     continue
-                # Unknown prompt with no valid actions — cancel and retry up to twice.
+                # Likely "Continue Main Phase?" prompt (not exposed via dialog list, not dismissed
+                # by cancel_activation_prompts()). Click YES while we still have actions to try.
                 if total_iterations <= 2:
-                    self.logger.info(f"[play_turn] No valid actions, prompt active (last_used='{last_used}') — cancelling and retrying.")
+                    self.logger.info(f"[play_turn] No valid actions, prompt active (last_used='{last_used}') — assuming Continue Main Phase? -> YES.")
+                    if self._handle_continue_main_phase_prompt(has_more_to_play=True):
+                        time.sleep(0.3)
+                        continue
                     self.duel_bot_client.cancel_activation_prompts()
                     time.sleep(0.5)
                     continue
@@ -1338,8 +1365,18 @@ class LockdownStunBotHandler(JDuelBotHandler):
                         continue
                     if self._handle_unending_nightmare_prompt():
                         continue
-                    self.logger.info("No action chosen (e.g. do not chain negate our own card) — cancel dialog.")
-                    self.duel_bot_client.cancel_activation_prompts()
+                    last_used = ""
+                    try:
+                        last_used = self.duel_bot_client.get_last_used_card_name()
+                    except Exception:
+                        pass
+                    if not last_used:
+                        # No specific card dialog pending -> likely "Continue Main Phase?" -> click NO.
+                        self.logger.info("[play_turn] No action chosen, no specific dialog -> Continue Main Phase? -> NO.")
+                        self._handle_continue_main_phase_prompt(has_more_to_play=False)
+                    else:
+                        self.logger.info("No action chosen (e.g. do not chain negate our own card) — cancel dialog.")
+                        self.duel_bot_client.cancel_activation_prompts()
                     time.sleep(0.3)
                 self.logger.info("No more playable actions. Ending turn.")
                 break
@@ -1364,8 +1401,31 @@ class LockdownStunBotHandler(JDuelBotHandler):
             self._unending_prompt_pending_until = 0.0
         self.logger.info(f"Turn complete. Total actions: {actions_taken}")
 
+    def _check_and_surrender_if_going_second(self) -> bool:
+        """
+        Surrender immediately if we went second (Turn 1 = we go first with no draw; Turn 2 = opponent
+        went first and we draw on our first turn). This deck's stun pieces lose most of their value
+        when we're already behind, so concede and queue up the next match instead.
+        """
+        try:
+            turn_number = self.duel_bot_client.get_turn_number()
+        except Exception as e:
+            self.logger.warning(f"[Surrender] get_turn_number() failed: {e}")
+            return False
+        if turn_number == 2:
+            self.logger.warning(f"[Surrender] Opponent went first (turn={turn_number}) — surrendering.")
+            try:
+                self.duel_bot_client.surrender_duel()
+            except Exception as e:
+                self.logger.warning(f"[Surrender] surrender_duel() failed: {e}")
+            time.sleep(0.5)
+            return True
+        return False
+
     def handle_my_draw_phase(self):
         self.logger.info("Handling draw phase...")
+        if self.surrender_if_going_second and self._check_and_surrender_if_going_second():
+            return
         # Cancel any blocking prompt before drawing (e.g. Time-Tearing Morganite YES/NO).
         # Without this, the bot loops every second clicking center while the prompt blocks.
         if self.duel_bot_client.is_inputting():
