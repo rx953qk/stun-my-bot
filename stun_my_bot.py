@@ -81,8 +81,8 @@ UnendingNightmare = {"Unending Nightmare", 95, "trap", "utility_trap"}
 HAND_PRIORITY = {
     "Time-Tearing Morganite": 250,
     "Pot of Duality": 240,
-    "Pot of Extravagance": 230,
-    "Pot of Desires": 220,
+    "Pot of Extravagance": 235,
+    "Pot of Desires": 215,
     "Inspector Boarder": 200,
     "Fossil Dyna Pachycephalo": 195,
     "Thunder King Rai-Oh": 190,
@@ -1335,19 +1335,33 @@ class LockdownStunBotHandler(JDuelBotHandler):
                     self._handle_pot_of_extravagance_dialog()
                     actions_taken += 1
                     continue
-                # Unknown prompt — could be a leftover from draw/standby or "Continue Main Phase?".
-                # At the start of the turn (no actions yet), cancel first so we don't accidentally
-                # advance game state. Only use the YES coordinate click if we have already played
-                # something this turn (actions_taken > 0), which is when "Continue Main Phase?"
-                # legitimately appears mid-turn.
+                # Decide how to handle the stuck prompt based on what caused it and how many
+                # times we've already tried to clear it.
+                #
+                # "Continue Main Phase?" is a Y/N game-flow prompt (not dismissable via ESC /
+                # cancel_activation_prompts). It only appears AFTER we've already taken at least
+                # one action AND last_used is empty/'-' (no specific card pending).
+                #
+                # Any other prompt (chain resolution, "activate effect?", leftover from standby)
+                # should be dismissed with cancel first; if cancel keeps failing, try a YES
+                # coordinate click as a last resort to unblock the game.
+                is_unknown_prompt = last_used in ("", "-")
+                if actions_taken > 0 and is_unknown_prompt and total_iterations <= 3:
+                    self.logger.info(f"[play_turn] Unknown prompt mid-turn (iter={total_iterations}) — Continue Main Phase? YES.")
+                    if self._handle_continue_main_phase_prompt(has_more_to_play=True):
+                        time.sleep(0.3)
+                        continue
                 if total_iterations <= 3:
-                    if actions_taken > 0:
-                        self.logger.info(f"[play_turn] Prompt after actions (last_used='{last_used}') — assuming Continue Main Phase? -> YES.")
-                        if self._handle_continue_main_phase_prompt(has_more_to_play=True):
-                            time.sleep(0.3)
-                            continue
-                    self.logger.info(f"[play_turn] Prompt at turn start (last_used='{last_used}') — cancelling to clear leftover prompt.")
+                    # Cancel first — handles leftover chain/activate prompts at turn start.
+                    self.logger.info(f"[play_turn] Cancelling prompt (last_used='{last_used}', iter={total_iterations}).")
                     self.duel_bot_client.cancel_activation_prompts()
+                    time.sleep(0.5)
+                    continue
+                elif total_iterations <= 6:
+                    # cancel_activation_prompts() didn't work — try clicking YES coordinate to
+                    # dismiss whatever is blocking (e.g. a non-ESC-dismissable phase prompt).
+                    self.logger.info(f"[play_turn] Prompt persists after cancel — clicking YES (last_used='{last_used}', iter={total_iterations}).")
+                    self.duel_bot_client.simulate_click(self._continue_main_phase_coordinates["YES"])
                     time.sleep(0.5)
                     continue
             elif not valid and actions_taken == 0 and total_iterations == 1:
