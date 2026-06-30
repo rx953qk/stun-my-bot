@@ -19,7 +19,9 @@ from jduel_bot.jduel_bot_enums import (
     CardFace,
     CardTurn,
     DuelLogViewType,
+    ActivateConfirmMode,
 )
+from jduel_bot.jduel_bot_stuck_handler import StuckHandler
 from jduel_bot.jduel_bot_handler import JDuelBotHandler
 from jduel_bot.jduel_bot_logger import LoggerManager, get_log_path
 
@@ -169,7 +171,8 @@ class LockdownStunBotHandler(JDuelBotHandler):
 
     # ===== Draw phase =====
     def handle_my_draw_phase(self):
-        """Override: log the turn, then let the base class draw."""
+        """Override: reset activation confirmation, log the turn, then let the base class draw."""
+        self.duel_bot_client.set_activation_confirmation(ActivateConfirmMode.Default)
         try:
             turn = self.duel_bot_client.get_turn_number()
             self.logger.info(f"[Draw] Turn {turn}")
@@ -1373,6 +1376,7 @@ class LockdownStunBotHandler(JDuelBotHandler):
         self.logger.info(f"[Turn] Complete. Total actions: {actions_taken}")
 
     def handle_my_main_phase_1(self):
+        self.duel_bot_client.set_activation_confirmation(ActivateConfirmMode.Default)
         self.duel_bot_client.cancel_activation_prompts()
         self.play_turn()
         turn = self.duel_bot_client.get_turn_number()
@@ -1541,6 +1545,7 @@ class LockdownStunBotHandler(JDuelBotHandler):
 
 if __name__ == "__main__":
     import os
+    import threading
     _log_path = get_log_path(__file__)
     if os.path.isfile(_log_path):
         with open(_log_path, "w", encoding="utf-8") as _f:
@@ -1551,6 +1556,10 @@ if __name__ == "__main__":
 
     duel_bot_client = JDuelBotClient(master_duel_connection_address)
     duel_bot = LockdownStunBotHandler(duel_bot_client, logger)
+
+    stuck_handler = StuckHandler(duel_bot_client, script_name="stun_my_bot")
+    stuck_thread = threading.Thread(target=stuck_handler.run, daemon=True)
+    stuck_thread.start()
 
     logger.info("Stun bot running. Press Ctrl+C to stop.")
     try:
