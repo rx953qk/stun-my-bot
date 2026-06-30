@@ -1343,16 +1343,27 @@ class LockdownStunBotHandler(JDuelBotHandler):
                 # and only after several cancel attempts have failed.
                 is_unknown_prompt = last_used in ("", "-")
 
-                # Mid-turn unknown prompt with several cancels already tried → Continue Main Phase? YES
-                if actions_taken > 0 and is_unknown_prompt and total_iterations > 4:
-                    self.logger.info(f"[play_turn] Unknown prompt persists mid-turn (iter={total_iterations}) — Continue Main Phase? YES.")
-                    self.duel_bot_client.simulate_click(self._continue_main_phase_coordinates["YES"])
-                    time.sleep(0.5)
+                if actions_taken > 0 and is_unknown_prompt:
+                    # Unknown prompt after playing a card: could be chain animation, "Continue Main Phase?",
+                    # or a continuous spell effect resolving. Cancel first, then try YES briefly, then wait it out.
+                    if total_iterations <= 4:
+                        self.logger.info(f"[play_turn] Unknown prompt after action (iter={total_iterations}) — cancelling.")
+                        self.duel_bot_client.cancel_activation_prompts()
+                        time.sleep(1.0)
+                    elif total_iterations <= 8:
+                        # Try YES coordinate a limited number of times for "Continue Main Phase?"
+                        self.logger.info(f"[play_turn] Trying Continue Main Phase? YES (iter={total_iterations}).")
+                        self.duel_bot_client.simulate_click(self._continue_main_phase_coordinates["YES"])
+                        time.sleep(1.2)
+                    else:
+                        # YES clicks haven't cleared it — just wait for game to auto-resolve animation/effect.
+                        self.logger.info(f"[play_turn] Waiting for game to auto-resolve unknown prompt (iter={total_iterations}).")
+                        time.sleep(2.0)
                     continue
 
                 # Default: cancel and retry. Give named-card chain windows more time to clear.
                 wait_time = 1.0 if not is_unknown_prompt else 0.6
-                self.logger.info(f"[play_turn] Cancelling prompt (last_used='{last_used}', iter={total_iterations}).")
+                self.logger.info(f"[play_turn] Cancelling prompt (iter={total_iterations}, last_used='{last_used}').")
                 self.duel_bot_client.cancel_activation_prompts()
                 time.sleep(wait_time)
                 continue  # always loop back — break only when choose_best returns None
@@ -1401,10 +1412,19 @@ class LockdownStunBotHandler(JDuelBotHandler):
                 self._handle_pot_of_extravagance_dialog()
             actions_taken += 1
             self.logger.info(f"Actions taken this turn: {actions_taken}")
-            time.sleep(0.5)
+            # Give extra time after each action for effects and chain animations to settle.
+            time.sleep(1.2)
             self._log_prompt_if_inputting()
-            if self.duel_bot_client.cancel_activation_prompts():
-                pass
+            # Only cancel if still prompting AND no known multi-stage flow is pending.
+            if self.duel_bot_client.is_inputting() and self._super_poly_stage == "none":
+                last_after = ""
+                try:
+                    last_after = self.duel_bot_client.get_last_used_card_name()
+                except Exception:
+                    pass
+                # Do not cancel immediately after a named-card prompt — let loop handle it properly.
+                if last_after in ("", "-"):
+                    self.duel_bot_client.cancel_activation_prompts()
         if total_iterations >= max_total_iterations:
             self.logger.warning(f"[play_turn] Hit iteration cap — clearing Super Poly/Unending state.")
             self._super_poly_stage = "none"
