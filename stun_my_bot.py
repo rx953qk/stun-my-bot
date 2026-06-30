@@ -167,6 +167,7 @@ class LockdownStunBotHandler(JDuelBotHandler):
         self._continue_main_phase_coordinates = {"YES": Coordinates(741, 425), "NO": Coordinates(541, 425)}
         # Surrender immediately if we go second — this deck is a turn-1 setup deck with little value when behind.
         self.surrender_if_going_second = True
+        self._already_surrendered = False
         # Super Polymerization: multi-stage prompt tracking (avoid mis-detect / infinite loop)
         self._super_poly_cost_pending_until = 0.0
         # stages: none | discard | materials | fusion | position | zone (summon zone selection)
@@ -647,6 +648,7 @@ class LockdownStunBotHandler(JDuelBotHandler):
         self._super_poly_cost_pending_until = 0.0
         self._super_poly_stage = "none"
         self._unending_prompt_pending_until = 0.0
+        self._already_surrendered = False
 
     def _try_flip_my_facedown_monsters(self) -> None:
         """Before Battle: if our monsters are face-down, try to flip them if game allows (CommandBit.Reverse)."""
@@ -1335,35 +1337,25 @@ class LockdownStunBotHandler(JDuelBotHandler):
                     self._handle_pot_of_extravagance_dialog()
                     actions_taken += 1
                     continue
-                # Decide how to handle the stuck prompt based on what caused it and how many
-                # times we've already tried to clear it.
-                #
-                # "Continue Main Phase?" is a Y/N game-flow prompt (not dismissable via ESC /
-                # cancel_activation_prompts). It only appears AFTER we've already taken at least
-                # one action AND last_used is empty/'-' (no specific card pending).
-                #
-                # Any other prompt (chain resolution, "activate effect?", leftover from standby)
-                # should be dismissed with cancel first; if cancel keeps failing, try a YES
-                # coordinate click as a last resort to unblock the game.
+                # Named-card prompts (chain windows, "activate effect?") clear with cancel.
+                # Unknown prompts (last_used='' or '-') may be "Continue Main Phase?" which
+                # requires a coordinate click — but only try that mid-turn (actions_taken > 0)
+                # and only after several cancel attempts have failed.
                 is_unknown_prompt = last_used in ("", "-")
-                if actions_taken > 0 and is_unknown_prompt and total_iterations <= 3:
-                    self.logger.info(f"[play_turn] Unknown prompt mid-turn (iter={total_iterations}) — Continue Main Phase? YES.")
-                    if self._handle_continue_main_phase_prompt(has_more_to_play=True):
-                        time.sleep(0.3)
-                        continue
-                if total_iterations <= 3:
-                    # Cancel first — handles leftover chain/activate prompts at turn start.
-                    self.logger.info(f"[play_turn] Cancelling prompt (last_used='{last_used}', iter={total_iterations}).")
-                    self.duel_bot_client.cancel_activation_prompts()
-                    time.sleep(0.5)
-                    continue
-                elif total_iterations <= 6:
-                    # cancel_activation_prompts() didn't work — try clicking YES coordinate to
-                    # dismiss whatever is blocking (e.g. a non-ESC-dismissable phase prompt).
-                    self.logger.info(f"[play_turn] Prompt persists after cancel — clicking YES (last_used='{last_used}', iter={total_iterations}).")
+
+                # Mid-turn unknown prompt with several cancels already tried → Continue Main Phase? YES
+                if actions_taken > 0 and is_unknown_prompt and total_iterations > 4:
+                    self.logger.info(f"[play_turn] Unknown prompt persists mid-turn (iter={total_iterations}) — Continue Main Phase? YES.")
                     self.duel_bot_client.simulate_click(self._continue_main_phase_coordinates["YES"])
                     time.sleep(0.5)
                     continue
+
+                # Default: cancel and retry. Give named-card chain windows more time to clear.
+                wait_time = 1.0 if not is_unknown_prompt else 0.6
+                self.logger.info(f"[play_turn] Cancelling prompt (last_used='{last_used}', iter={total_iterations}).")
+                self.duel_bot_client.cancel_activation_prompts()
+                time.sleep(wait_time)
+                continue  # always loop back — break only when choose_best returns None
             elif not valid and actions_taken == 0 and total_iterations == 1:
                 # No prompt, no actions on first check — game may not be ready yet.
                 self.logger.info("[play_turn] No valid actions on first check — waiting for game to settle.")
@@ -1422,24 +1414,41 @@ class LockdownStunBotHandler(JDuelBotHandler):
 
     def _check_and_surrender_if_going_second(self) -> bool:
         """
-        Surrender immediately if we went second (Turn 1 = we go first with no draw; Turn 2 = opponent
-        went first and we draw on our first turn). This deck's stun pieces lose most of their value
-        when we're already behind, so concede and queue up the next match instead.
+        Surrender immediately if we went second (global turn 2 = opponent went first, we draw).
+        Cancels any active prompt first so the surrender API call isn't blocked, then waits for
+        the duel to end. Sets _already_surrendered so standby/main fallbacks don't double-fire.
         """
+        if self._already_surrendered:
+            return True
         try:
             turn_number = self.duel_bot_client.get_turn_number()
         except Exception as e:
             self.logger.warning(f"[Surrender] get_turn_number() failed: {e}")
             return False
-        if turn_number == 2:
-            self.logger.warning(f"[Surrender] Opponent went first (turn={turn_number}) — surrendering.")
-            try:
-                self.duel_bot_client.surrender_duel()
-            except Exception as e:
-                self.logger.warning(f"[Surrender] surrender_duel() failed: {e}")
+        if turn_number != 2:
+            return False
+        self.logger.warning(f"[Surrender] Opponent went first (turn={turn_number}) — surrendering.")
+        # Cancel any blocking prompt before the API call (a stuck prompt can prevent surrender).
+        try:
+            self.duel_bot_client.cancel_activation_prompts()
+        except Exception:
+            pass
+        time.sleep(0.3)
+        try:
+            self.duel_bot_client.surrender_duel()
+            self._already_surrendered = True
+        except Exception as e:
+            self.logger.warning(f"[Surrender] surrender_duel() failed: {e}")
+            return False
+        # Wait up to 5 s for the duel-ended screen so the framework loop doesn't keep running.
+        for _ in range(10):
             time.sleep(0.5)
-            return True
-        return False
+            try:
+                if self.duel_bot_client.is_duel_ended():
+                    break
+            except Exception:
+                break
+        return True
 
     def handle_my_draw_phase(self):
         self.logger.info("Handling draw phase...")
@@ -1455,8 +1464,20 @@ class LockdownStunBotHandler(JDuelBotHandler):
         if self.duel_bot_client.cancel_activation_prompts():
             self.logger.info("[Draw] Cancelling activation prompts after draw.")
 
+    def handle_my_standby_phase(self):
+        self.logger.info("Handling standby phase...")
+        # Fallback surrender in case draw-phase surrender didn't register before standby.
+        if self.surrender_if_going_second and self._check_and_surrender_if_going_second():
+            return
+        self.duel_bot_client.cancel_activation_prompts()
+
     def handle_my_main_phase_1(self):
         turn = self.duel_bot_client.get_turn_number()
+        # Fallback surrender in case draw/standby surrender didn't end the duel in time.
+        if self.surrender_if_going_second and turn == 2 and self._already_surrendered:
+            self.logger.warning("[Surrender] Still in duel after surrender — waiting for duel end.")
+            time.sleep(2.0)
+            return
         if turn == 1:
             self._reset_game_state()
         self.duel_bot_client.cancel_activation_prompts()
