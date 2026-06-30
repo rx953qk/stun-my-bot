@@ -158,8 +158,10 @@ class LockdownStunBotHandler(JDuelBotHandler):
                 last_event = duel_log[-1] if duel_log else None
                 if last_event in (DuelLogViewType.RunCoin, DuelLogViewType.RunJanken):
                     self.logger.info(f"[Setup] Coin toss detected ({last_event.name}) -> clicking 'Go First'")
-                    self.duel_bot_client.simulate_click(_GO_FIRST_COORD)
-                    time.sleep(0.5)
+                else:
+                    self.logger.info("[Setup] Null phase -> clicking 'Go First' (unconditional)")
+                self.duel_bot_client.simulate_click(_GO_FIRST_COORD)
+                time.sleep(0.5)
             except Exception as e:
                 self.logger.warning(f"[Setup] Null phase error: {e}")
         else:
