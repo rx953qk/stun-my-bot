@@ -1,22 +1,8 @@
 import sys
-import subprocess
 import time
 from pathlib import Path
 
-
-def ensure_packages():
-    """Auto-install minimal dependencies used by the framework."""
-    required = ["pyzmq", "loguru", "json5", "pywin32"]
-    for pkg in required:
-        try:
-            __import__(pkg)
-        except ImportError:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", pkg, "-q"])
-
-
-ensure_packages()
-
-# Add project root to sys.path
+# Add project root to sys.path so jduel_bot package is importable from the venv
 root_dir = str(Path(__file__).parent.parent.absolute())
 if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
@@ -54,43 +40,9 @@ COMMAND_BIT_TO_TYPE = {
     CommandBit.Draw: CommandType.Draw,
 }
 
-TimeTearingMorganite = {"Time-Tearing Morganite", 250, "spell", "continuous_spell"}
-
-PotOfDuality = {"Pot of Duality", 240, "spell", "draw_spell"}
-PotOfExtravagance = {"Pot of Extravagance", 230, "spell", "draw_spell"}
-PotOfDesires = {"Pot of Desires", 220, "spell", "draw_spell"}
-
-InspectorBoarder = {"Inspector Boarder", 200, "monster", "monster_stun"}
-FossilDyna = {"Fossil Dyna Pachycephalo", 195, "monster", "monster_stun"}
-ThunderKingRaiOh = {"Thunder King Rai-Oh", 190, "monster", "monster_stun"}
-BarrierStatueInferno = {"Barrier Statue of the Inferno", 185, "monster", "monster_stun"}
-BarrierStatueTorrent = {"Barrier Statue of the Torrent", 180, "monster", "monster_stun"}
-BanisherRadiance = {"Banisher of the Radiance", 175, "monster", "monster_stun"}
-
-Necrovalley = {"Necrovalley", 150, "spell", "field_spell"}
-ClockworkNight = {"Clockwork Night", 145, "spell", "continuous_spell"}
-
-SuperPolymerization = {"Super Polymerization", 120, "spell", "board_breaker"}
-
-DimensionShifter = {"Dimension Shifter", 115, "monster", "hand_trap"}
-ArtifactLancea = {"Artifact Lancea", 110, "monster", "hand_trap"}
-
-MacroCosmos = {"Macro Cosmos", 160, "trap", "continuous_trap"}
-ThereCanBeOnlyOne = {"There Can Be Only One", 155, "trap", "continuous_trap"}
-
-SolemnJudgment = {"Solemn Judgment", 105, "trap", "negate_trap"}
-SolemnStrike = {"Solemn Strike", 104, "trap", "negate_trap"}
-SolemnWarning = {"Solemn Warning", 103, "trap", "negate_trap"}
-IronThunder = {"Iron Thunder", 102, "trap", "negate_trap"}
-
-DominusImpulse = {"Dominus Impulse", 101, "trap", "negate_trap"}
-DominusPurge = {"Dominus Purge", 100, "trap", "negate_trap"}
-
-InfiniteImpermanence = {"Infinite Impermanence", 99, "trap", "negate_trap"}
-
-UnendingNightmare = {"Unending Nightmare", 95, "trap", "utility_trap"}
-
-# Priority for choosing actions (higher = prefer earlier). Used by _choose_best_action.
+# ---------------------------------------------------------------------------
+# Priority for choosing actions (higher = prefer earlier)
+# ---------------------------------------------------------------------------
 HAND_PRIORITY = {
     "Time-Tearing Morganite": 250,
     "Pot of Duality": 240,
@@ -102,13 +54,13 @@ HAND_PRIORITY = {
     "Barrier Statue of the Inferno": 185,
     "Barrier Statue of the Torrent": 180,
     "Banisher of the Radiance": 175,
+    "Macro Cosmos": 160,
+    "Clockwork Night": 160,
+    "There Can Be Only One": 155,
     "Necrovalley": 150,
-    "Clockwork Night": 160,  # Prefer over TCBOO when both in hand
     "Super Polymerization": 120,
     "Dimension Shifter": 115,
     "Artifact Lancea": 110,
-    "Macro Cosmos": 160,
-    "There Can Be Only One": 155,  # Lower than Clockwork Night (160) when both in hand
     "Solemn Judgment": 105,
     "Solemn Strike": 104,
     "Solemn Warning": 103,
@@ -118,91 +70,130 @@ HAND_PRIORITY = {
     "Infinite Impermanence": 99,
     "Unending Nightmare": 95,
 }
-# Monsters we do not normal summon (hand-trap style).
+
 NEVER_SUMMON = {"Dimension Shifter", "Artifact Lancea"}
-# Prefer summoning these on turn 1 (when going first); when going second prefer highest ATK.
 MONSTER_STUN_NAMES = {
     "Inspector Boarder", "Fossil Dyna Pachycephalo", "Thunder King Rai-Oh",
     "Barrier Statue of the Inferno", "Barrier Statue of the Torrent", "Banisher of the Radiance",
 }
 NEVER_SET_FROM_HAND = {"Artifact Lancea"}
+SET_ALLOW_DUPLICATE_NAMES = {"Infinite Impermanence"}
 
-# Artifact Lancea: only activate from hand vs banish-heavy decks.
 LANCEA_NAME = "Artifact Lancea"
 LANCEA_ANTI_BANISH_DECK_KEYWORDS = {
-    # Kashtira
     "Kashtira", "Fenrir", "Unicorn", "Theosis", "Birth", "Riseheart", "Arise-Heart",
-    # Runick
     "Runick", "Hugin", "Fountain", "Tip", "Munin",
-    # Floowandereeze
     "Floowandereeze", "Robina", "Eaglen", "Empen", "Map", "Advent",
-    # Dragon Link (heuristic)
     "Rokket", "Borrel", "Striker Dragon", "Chaos Space", "Dragon Ravine", "Boot Sector",
-    # Branded (partial)
     "Branded", "Aluber", "Fallen of Albaz", "Mirrorjade", "Lubellion", "Bystial",
 }
 
-# Setting: do not set duplicate names on field, except these may be set in multiple copies.
-SET_ALLOW_DUPLICATE_NAMES = {"Infinite Impermanence"}
-
-# Negate traps: used to respond to opponent's actions -> must be used first (priority when chaining).
 NEGATE_TRAP_NAMES = {
     "Solemn Judgment", "Solemn Strike", "Solemn Warning",
     "Iron Thunder", "Dominus Impulse", "Dominus Purge", "Infinite Impermanence",
 }
-# Continuous traps: activate when possible but always after negate traps when chaining.
 CONTINUOUS_TRAP_NAMES = {"Macro Cosmos", "There Can Be Only One", "Unending Nightmare"}
-# Solemn can negate any opponent effect -> always priority when chaining.
 SOLEMN_NAMES = {"Solemn Judgment", "Solemn Strike", "Solemn Warning"}
-# CardPosition Monster = 0 .. MonsterEnd = 6 (monster zones)
+
 MONSTER_ZONE_POSITION_MAX = 6
 INFINITE_IMPERMANENCE_NAME = "Infinite Impermanence"
 DOMINUS_IMPULSE_NAME = "Dominus Impulse"
 CLOCKWORK_NIGHT_NAME = "Clockwork Night"
 TCBOO_NAME = "There Can Be Only One"
-
-# Draw spells: use first when playing proactively (not chaining).
 DRAW_SPELL_NAMES = {"Pot of Duality", "Pot of Extravagance", "Pot of Desires"}
-# Only Pot of Duality/Pot of Extravagance need special dialog handling.
 POT_OF_DUALITY_NAME = "Pot of Duality"
 POT_OF_EXTRAVAGANCE_NAME = "Pot of Extravagance"
 UNENDING_NIGHTMARE_NAME = "Unending Nightmare"
 SUPER_POLY_NAME = "Super Polymerization"
 
-
+# Coordinates for common prompts (1280x720)
+# YES/NO generic dialog
+_YES_COORD = Coordinates(741, 425)
+_NO_COORD = Coordinates(541, 425)
+# Coin toss: "Go First" (left button) / "Go Second" (right button) at 1280x720
+# Adjust if the game layout differs; these are the standard positions.
+_GO_FIRST_COORD = Coordinates(400, 490)
+_GO_SECOND_COORD = Coordinates(880, 490)
 
 
 class LockdownStunBotHandler(JDuelBotHandler):
     def __init__(self, duel_bot_client: JDuelBotClient, logger):
         super().__init__(duel_bot_client, logger)
-        self.bamboo_equipped_on_field = False  # Track if a Bamboo Sword equip is on field
-        self.first_card_activation_coordinates = {"YES": Coordinates(741, 425), "NO": Coordinates(541, 425)}
-        # Super Polymerization: multi-stage prompt tracking (avoid mis-detect / infinite loop)
+        # Super Polymerization: multi-stage prompt tracking
         self._super_poly_cost_pending_until = 0.0
-        # stages: none | discard | materials | fusion | position | zone (summon zone selection)
         self._super_poly_stage = "none"
-        # Position prompt (Face-Up ATK/DEF) coordinates (1280x720)
+        # Position prompt coordinates (Face-Up ATK/DEF)
         self._pos_faceup_atk = Coordinates(568, 580)
         self._pos_faceup_def = Coordinates(712, 580)
-        # Unending Nightmare: only handle YES/NO prompt after we actually activate it (Action)
+        # Unending Nightmare: only handle YES/NO prompt after activation
         self._unending_prompt_pending_until = 0.0
-        
+        # Track whether we tried to select Go First this non-duel window
+        self._went_first: bool | None = None
 
+    # ===== Non-duel phase: coin toss / deck selection =====
+    def while_not_dueling(self):
+        """
+        Called every second when not in a duel.
+        Attempt to click "Go First" whenever the game is waiting for input.
+        This covers the coin-toss prompt that appears before each duel.
+        """
+        try:
+            if self.duel_bot_client.is_inputting():
+                self.logger.info("[Setup] Input prompt detected outside duel -> clicking 'Go First'")
+                self.duel_bot_client.simulate_click(_GO_FIRST_COORD)
+                time.sleep(0.5)
+                # If still inputting, try cancel so the game doesn't get stuck
+                if self.duel_bot_client.is_inputting():
+                    self.duel_bot_client.cancel_activation_prompts()
+        except Exception as e:
+            self.logger.warning(f"[Setup] while_not_dueling error: {e}")
+        self._went_first = None  # reset for next duel
+
+    # ===== Draw phase =====
+    def handle_my_draw_phase(self):
+        """Override: log the turn, then let the base class draw."""
+        try:
+            turn = self.duel_bot_client.get_turn_number()
+            self.logger.info(f"[Draw] Turn {turn}")
+        except Exception:
+            pass
+        super().handle_my_draw_phase()
+
+    # ===== Standby phase: surrender if we are going second =====
+    def handle_my_standby_phase(self):
+        """
+        If it is turn 2 (our first turn, but the opponent went first on turn 1),
+        surrender immediately. Going second with this stun strategy is losing.
+        """
+        try:
+            turn = self.duel_bot_client.get_turn_number()
+            if turn == 2:
+                self.logger.warning("[Surrender] Opponent went first (turn 2 is our first turn). Surrendering.")
+                self.duel_bot_client.surrender_duel()
+                return
+            self.logger.info(f"[Standby] Turn {turn} — we went first, continuing.")
+        except Exception as e:
+            self.logger.warning(f"[Standby] Error checking turn: {e}")
+        super().handle_my_standby_phase()
 
     # ===== Get all valid actions from the game =====
     def _get_all_valid_actions(self):
         valid_actions = []
-        board_state = self.duel_bot_client.get_board_state()
-        my_state = board_state.player_card_states[Player.Myself]
+        try:
+            board_state = self.duel_bot_client.get_board_state()
+            my_state = board_state.player_card_states[Player.Myself]
+        except Exception as e:
+            self.logger.warning(f"[Actions] Failed to read board state: {e}")
+            return valid_actions
 
-        # Hand: Summon, Set, Action (activate from hand)
+        # Hand: Summon, Set, Action
         for i, card in enumerate(my_state.hand):
             if not card:
                 continue
             atk_val = getattr(card, "attack", None)
             if atk_val is None:
-                atk_val = getattr(card, "atk", 0)
-            for bit in card.command_bits:
+                atk_val = getattr(card, "atk", 0) or 0
+            for bit in (getattr(card, "command_bits", []) or []):
                 if bit in COMMAND_BIT_TO_TYPE:
                     valid_actions.append({
                         "player": Player.Myself,
@@ -216,7 +207,7 @@ class LockdownStunBotHandler(JDuelBotHandler):
                         "attack": atk_val,
                     })
 
-        # Field: monsters and spells_and_traps (activate on field)
+        # Field: monsters and spells_and_traps
         for zone, base_pos in (
             (my_state.monsters, CardPosition.Monster),
             (my_state.spells_and_traps, CardPosition.Magic),
@@ -224,7 +215,7 @@ class LockdownStunBotHandler(JDuelBotHandler):
             for i, card in enumerate(zone):
                 if not card:
                     continue
-                for bit in card.command_bits:
+                for bit in (getattr(card, "command_bits", []) or []):
                     if bit in COMMAND_BIT_TO_TYPE:
                         valid_actions.append({
                             "player": Player.Myself,
@@ -240,39 +231,30 @@ class LockdownStunBotHandler(JDuelBotHandler):
         return valid_actions
 
     def _filter_set_duplicates(self, valid_actions):
-        """Remove Set actions that would duplicate a card name on field, except Infinite Impermanence."""
-        board_state = self.duel_bot_client.get_board_state()
-        my_state = board_state.player_card_states[Player.Myself]
-        names_on_field = {c.name for c in my_state.spells_and_traps if c}
+        """Remove Set actions that would duplicate a card name on field (except Infinite Impermanence)."""
+        try:
+            board_state = self.duel_bot_client.get_board_state()
+            my_state = board_state.player_card_states[Player.Myself]
+        except Exception:
+            return valid_actions
+        names_on_field = {c.name for c in (my_state.spells_and_traps or []) if c}
         out = []
         for a in valid_actions:
             if a["command_type"] == CommandType.Set and a["position"] == CardPosition.Hand:
                 if a["card_name"] in NEVER_SET_FROM_HAND:
                     continue
-                # Normal/Quick-Play spells must not be set, except Super Polymerization.
                 card_type = str(a.get("type", "") or "")
                 card_typeline = str(a.get("typeline", "") or "")
                 is_spell = "Spell" in card_type or "Spell" in card_typeline
                 is_field = "Field" in card_type or "Field" in card_typeline
                 is_continuous = "Continuous" in card_type or "Continuous" in card_typeline
-                if (
-                    is_spell
-                    and not is_field
-                    and not is_continuous
-                    and a["card_name"] != SUPER_POLY_NAME
-                ):
-                # e.g. Pot of Duality/Desires/Extravagance, Time-Tearing Morganite must be activated from hand, not set.
+                if is_spell and not is_field and not is_continuous and a["card_name"] != SUPER_POLY_NAME:
                     continue
-                # If one of Clockwork Night / There Can Be Only One is already on field (set or face-up),
-                # do not Set the other (avoid conflict). Only block when the OTHER card is on field.
                 if a["card_name"] in {CLOCKWORK_NIGHT_NAME, TCBOO_NAME}:
-                    conflict_present = False
-                    for st in my_state.spells_and_traps or []:
-                        if not st:
-                            continue
-                        if st.name in {CLOCKWORK_NIGHT_NAME, TCBOO_NAME} and st.name != a["card_name"]:
-                            conflict_present = True
-                            break
+                    conflict_present = any(
+                        st and st.name in {CLOCKWORK_NIGHT_NAME, TCBOO_NAME} and st.name != a["card_name"]
+                        for st in (my_state.spells_and_traps or [])
+                    )
                     if conflict_present:
                         continue
                 if a["card_name"] in names_on_field and a["card_name"] not in SET_ALLOW_DUPLICATE_NAMES:
@@ -281,15 +263,12 @@ class LockdownStunBotHandler(JDuelBotHandler):
         return out
 
     def _opponent_is_anti_lancea_target(self) -> bool:
-        """Heuristic: detect if opponent's deck is a good Lancea target."""
         try:
             board = self.duel_bot_client.get_board_state()
             opp = board.player_card_states.get(Player.Opponent)
             if not opp:
                 return False
-
             seen: list[str] = []
-            # Hand may not be readable; if readable, use it.
             for c in (opp.hand or []):
                 if c and getattr(c, "name", None):
                     seen.append(str(c.name))
@@ -299,7 +278,6 @@ class LockdownStunBotHandler(JDuelBotHandler):
                         seen.append(str(c.name))
             if opp.field_spell and getattr(opp.field_spell, "name", None):
                 seen.append(str(opp.field_spell.name))
-
             for name in seen:
                 for kw in LANCEA_ANTI_BANISH_DECK_KEYWORDS:
                     if kw in name:
@@ -309,7 +287,6 @@ class LockdownStunBotHandler(JDuelBotHandler):
         return False
 
     def _try_activate_lancea_if_available(self) -> bool:
-        """On opponent's turn with chain prompt: if Lancea in hand is activatable (Action) and matchup fits, activate it."""
         try:
             if not self.duel_bot_client.is_inputting():
                 return False
@@ -317,20 +294,16 @@ class LockdownStunBotHandler(JDuelBotHandler):
                 return False
             if not self._opponent_is_anti_lancea_target():
                 return False
-
             board = self.duel_bot_client.get_board_state()
             my_state = board.player_card_states.get(Player.Myself)
             if not my_state:
                 return False
-
             for idx, c in enumerate(my_state.hand or []):
                 if not c or str(getattr(c, "name", "")) != LANCEA_NAME:
                     continue
                 if CommandBit.Action not in (getattr(c, "command_bits", []) or []):
-                    self.logger.info("[Lancea] On hand but not activatable now (no Action).")
                     return False
-
-                self.logger.info("[Lancea] Activatable on opponent prompt -> activating from hand")
+                self.logger.info("[Lancea] Activating from hand on opponent prompt")
                 self.duel_bot_client.activate_monster_effect_from_hand(idx)
                 self.duel_bot_client.wait_for_input_enabled()
                 return True
@@ -339,15 +312,13 @@ class LockdownStunBotHandler(JDuelBotHandler):
         return False
 
     def _pick_discard_index_for_cost(self) -> int | None:
-        """Pick hand index to discard (cost). Prefer discarding the lowest-priority card."""
         try:
             board = self.duel_bot_client.get_board_state()
             my_state = board.player_card_states.get(Player.Myself)
             if not my_state:
                 return None
-
             best_idx = None
-            best_score = None  # lower is better (we discard the least valuable)
+            best_score = None
             for i, c in enumerate(my_state.hand or []):
                 if not c or not getattr(c, "name", None):
                     continue
@@ -358,13 +329,11 @@ class LockdownStunBotHandler(JDuelBotHandler):
                 if best_score is None or score < best_score:
                     best_score = score
                     best_idx = i
-
             return best_idx
         except Exception:
             return None
 
     def _handle_super_poly_discard_prompt(self) -> bool:
-        """Super Polymerization: on activation requires discarding 1 from hand -> auto pick one and confirm."""
         try:
             if not self.duel_bot_client.is_inputting():
                 return False
@@ -376,30 +345,25 @@ class LockdownStunBotHandler(JDuelBotHandler):
             try:
                 last_used = self.duel_bot_client.get_last_used_card_name()
             except Exception:
-                last_used = ""
+                pass
             if last_used != SUPER_POLY_NAME:
                 return False
 
             idx = self._pick_discard_index_for_cost()
             if idx is None:
-                self.logger.warning("[Super Poly] No discard candidate found; cancelling prompt.")
+                self.logger.warning("[Super Poly] No discard candidate; cancelling.")
                 self.duel_bot_client.cancel_activation_prompts()
                 self._super_poly_cost_pending_until = 0.0
                 self._super_poly_stage = "none"
                 return True
 
-            # Try a few indices/buttons (some prompts map to different confirm buttons)
-            candidates = [idx, 0, 1, 2, 3, 4, 5]
-            seen = set()
+            candidates = list(dict.fromkeys([idx, 0, 1, 2, 3, 4, 5]))
             for cand in candidates:
-                if cand in seen:
-                    continue
-                seen.add(cand)
-                self.logger.info(f"[Super Poly] Discard cost: try hand index={cand} (Middle)")
+                self.logger.info(f"[Super Poly] Discard cost: hand index={cand} (Middle)")
                 try:
                     self.duel_bot_client.select_cards_from_dialog(
                         [CardSelection(card_index=cand)],
-                        dialog_button_type=DialogButtonType.Middle,  # Select / OK
+                        dialog_button_type=DialogButtonType.Middle,
                         milliseconds_delay_between_clicks=200,
                     )
                     self.duel_bot_client.wait_for_input_enabled()
@@ -410,7 +374,6 @@ class LockdownStunBotHandler(JDuelBotHandler):
                 except Exception:
                     pass
 
-                self.logger.info(f"[Super Poly] Discard cost: try hand index={cand} (Right)")
                 try:
                     self.duel_bot_client.select_cards_from_dialog(
                         [CardSelection(card_index=cand)],
@@ -425,17 +388,15 @@ class LockdownStunBotHandler(JDuelBotHandler):
                 except Exception:
                     pass
 
-            # If still inputting, likely moved to Fusion Material selection -> switch stage
-            self.logger.info("[Super Poly] After discard attempt still inputting -> switching to materials stage.")
+            self.logger.info("[Super Poly] After discard still inputting -> materials stage")
             self._super_poly_stage = "materials"
             self._super_poly_cost_pending_until = time.time() + 12.0
             return True
         except Exception as e:
-            self.logger.warning(f"[Super Poly] Discard prompt handle failed: {e}")
+            self.logger.warning(f"[Super Poly] Discard prompt failed: {e}")
             return False
 
     def _handle_super_poly_material_prompt(self) -> bool:
-        """Super Polymerization: after discard, requires selecting 2 monsters as Fusion Material."""
         try:
             if not self.duel_bot_client.is_inputting():
                 return False
@@ -448,7 +409,7 @@ class LockdownStunBotHandler(JDuelBotHandler):
             try:
                 last_used = self.duel_bot_client.get_last_used_card_name()
             except Exception:
-                last_used = ""
+                pass
             if last_used != SUPER_POLY_NAME:
                 return False
 
@@ -468,31 +429,20 @@ class LockdownStunBotHandler(JDuelBotHandler):
                     out.append(m.position)
                 return out
 
-            candidates = []
-            candidates += collect(opp, True)
-            candidates += collect(opp, False)
+            candidates = collect(opp, True) + collect(opp, False)
             if len(set(candidates)) < 2:
                 candidates += collect(my, False)
 
-            uniq = []
-            seen = set()
-            for p in candidates:
-                if p in seen:
-                    continue
-                seen.add(p)
-                uniq.append(p)
-
+            uniq = list(dict.fromkeys(candidates))
             if len(uniq) < 2:
-                self.logger.warning("[Super Poly] Not enough monsters to select materials; cancelling.")
+                self.logger.warning("[Super Poly] Not enough monsters; cancelling.")
                 self.duel_bot_client.cancel_activation_prompts()
                 self._super_poly_stage = "none"
                 self._super_poly_cost_pending_until = 0.0
                 return True
 
             p1, p2 = uniq[0], uniq[1]
-            self.logger.info(f"[Super Poly] Selecting fusion materials: {p1.name}, {p2.name}")
-
-            # Select two monsters by targeting them (field selection)
+            self.logger.info(f"[Super Poly] Fusion materials: {p1.name}, {p2.name}")
             try:
                 self.duel_bot_client.target_card(Player.Opponent, p1)
             except Exception:
@@ -503,8 +453,6 @@ class LockdownStunBotHandler(JDuelBotHandler):
             except Exception:
                 self.duel_bot_client.target_card(Player.Myself, p2)
             time.sleep(0.2)
-
-            # Confirm selection if possible
             try:
                 self.duel_bot_client.execute_command(Player.Myself, CardPosition.Select, 0, CommandType.Decide)
                 self.duel_bot_client.wait_for_input_enabled()
@@ -516,21 +464,18 @@ class LockdownStunBotHandler(JDuelBotHandler):
                 self._super_poly_cost_pending_until = 0.0
                 return True
 
-            # After selecting materials, game asks for Fusion Monster to summon, then Face-Up ATK/DEF. Switch to fusion stage first.
-            self.logger.info("[Super Poly] After selecting materials still inputting -> likely fusion-choice prompt.")
+            self.logger.info("[Super Poly] After materials still inputting -> fusion stage")
             self._super_poly_stage = "fusion"
             self._super_poly_cost_pending_until = time.time() + 12.0
             return True
         except Exception as e:
-            self.logger.warning(f"[Super Poly] Material prompt handle failed: {e}")
+            self.logger.warning(f"[Super Poly] Material prompt failed: {e}")
             return False
 
     def _handle_faceup_position_prompt(self) -> bool:
-        """Choose Face-Up position (ATK preferred) when game asks after Fusion/Summon."""
         try:
             if not self.duel_bot_client.is_inputting():
                 return False
-            # Only handle when in Super Poly flow to avoid clicking wrong prompt
             if getattr(self, "_super_poly_stage", "none") != "position":
                 return False
             if time.time() > float(self._super_poly_cost_pending_until or 0.0):
@@ -540,11 +485,11 @@ class LockdownStunBotHandler(JDuelBotHandler):
             try:
                 last_used = self.duel_bot_client.get_last_used_card_name()
             except Exception:
-                last_used = ""
+                pass
             if last_used != SUPER_POLY_NAME:
                 return False
 
-            self.logger.info("[Super Poly] Position prompt -> choosing Face-Up Attack")
+            self.logger.info("[Super Poly] Position prompt -> Face-Up Attack")
             self.duel_bot_client.simulate_click(self._pos_faceup_atk)
             time.sleep(0.4)
             self.duel_bot_client.wait_for_input_enabled()
@@ -553,8 +498,7 @@ class LockdownStunBotHandler(JDuelBotHandler):
                 self._super_poly_cost_pending_until = time.time() + 8.0
                 return True
 
-            # fallback: try defense if attack didn't work
-            self.logger.info("[Super Poly] Position prompt still inputting -> trying Face-Up Defense")
+            self.logger.info("[Super Poly] Position prompt -> trying Face-Up Defense")
             self.duel_bot_client.simulate_click(self._pos_faceup_def)
             time.sleep(0.4)
             self.duel_bot_client.wait_for_input_enabled()
@@ -563,17 +507,16 @@ class LockdownStunBotHandler(JDuelBotHandler):
                 self._super_poly_cost_pending_until = time.time() + 8.0
                 return True
 
-            self.logger.warning("[Super Poly] Position prompt still inputting -> cancelling to avoid loop.")
+            self.logger.warning("[Super Poly] Position prompt still inputting -> cancelling")
             self.duel_bot_client.cancel_activation_prompts()
             self._super_poly_stage = "none"
             self._super_poly_cost_pending_until = 0.0
             return True
         except Exception as e:
-            self.logger.warning(f"[Super Poly] Position prompt handle failed: {e}")
+            self.logger.warning(f"[Super Poly] Position prompt failed: {e}")
             return False
 
     def _handle_summon_zone_prompt(self) -> bool:
-        """After choosing position (ATK/DEF), game asks for summon zone — click one empty monster zone."""
         try:
             if not self.duel_bot_client.is_inputting():
                 return False
@@ -586,11 +529,11 @@ class LockdownStunBotHandler(JDuelBotHandler):
             board = self.duel_bot_client.get_board_state()
             pos = self.duel_bot_client.get_free_monster_card_zone(board)
             if not pos:
-                self.logger.warning("[Super Poly] Summon zone prompt: no free monster zone.")
+                self.logger.warning("[Super Poly] No free monster zone for summon.")
                 self._super_poly_stage = "none"
                 self._super_poly_cost_pending_until = 0.0
                 return True
-            self.logger.info(f"[Super Poly] Summon zone prompt -> selecting summon zone: {pos.name}")
+            self.logger.info(f"[Super Poly] Summon zone -> {pos.name}")
             self.duel_bot_client.click_my_monster_zone(pos)
             time.sleep(0.4)
             self.duel_bot_client.wait_for_input_enabled()
@@ -598,11 +541,10 @@ class LockdownStunBotHandler(JDuelBotHandler):
             self._super_poly_cost_pending_until = 0.0
             return True
         except Exception as e:
-            self.logger.warning(f"[Super Poly] Summon zone prompt handle failed: {e}")
+            self.logger.warning(f"[Super Poly] Summon zone prompt failed: {e}")
             return False
 
     def _handle_super_poly_fusion_prompt(self) -> bool:
-        """After selecting materials, Super Poly opens dialog to choose Fusion Monster to summon."""
         try:
             if not self.duel_bot_client.is_inputting():
                 return False
@@ -615,19 +557,17 @@ class LockdownStunBotHandler(JDuelBotHandler):
             try:
                 last_used = self.duel_bot_client.get_last_used_card_name()
             except Exception:
-                last_used = ""
+                pass
             if last_used != SUPER_POLY_NAME:
                 return False
 
-            # Brief wait for dialog to fully appear
             time.sleep(0.3)
             if not self.duel_bot_client.is_inputting():
                 self._super_poly_stage = "none"
                 self._super_poly_cost_pending_until = 0.0
                 return True
 
-            # Dialog is usually Fusion Monster list – often only one choice. Select index 0.
-            self.logger.info("[Super Poly] Fusion prompt -> selecting first fusion monster (index=0)")
+            self.logger.info("[Super Poly] Fusion prompt -> selecting index=0")
             try:
                 self.duel_bot_client.select_card_from_dialog(
                     CardSelection(card_index=0),
@@ -636,52 +576,45 @@ class LockdownStunBotHandler(JDuelBotHandler):
                 )
                 self.duel_bot_client.wait_for_input_enabled()
             except Exception as e:
-                self.logger.warning(f"[Super Poly] Fusion select via dialog failed: {e}")
+                self.logger.warning(f"[Super Poly] Fusion select failed: {e}")
 
             if not self.duel_bot_client.is_inputting():
-                # Game may have auto-selected position; reset stage.
                 self._super_poly_stage = "none"
                 self._super_poly_cost_pending_until = 0.0
                 return True
 
-            # Still prompting -> likely moved to position selection.
-            self.logger.info("[Super Poly] After fusion choice still inputting -> likely position prompt.")
+            self.logger.info("[Super Poly] After fusion still inputting -> position stage")
             self._super_poly_stage = "position"
             self._super_poly_cost_pending_until = time.time() + 12.0
             return True
         except Exception as e:
-            self.logger.warning(f"[Super Poly] Fusion prompt handle failed: {e}")
+            self.logger.warning(f"[Super Poly] Fusion prompt failed: {e}")
             return False
 
     def _try_flip_my_facedown_monsters(self) -> None:
-        """Before Battle: if our monsters are face-down, try to flip them if game allows (CommandBit.Reverse)."""
         try:
             board = self.duel_bot_client.get_board_state()
             my_state = board.player_card_states.get(Player.Myself)
             for m in (my_state.monsters if my_state else []) or []:
-                if not m:
-                    continue
-                if getattr(m, "face", None) != CardFace.FaceDown:
+                if not m or getattr(m, "face", None) != CardFace.FaceDown:
                     continue
                 pos = getattr(m, "position", None)
                 if pos is None:
                     continue
                 bits = getattr(m, "command_bits", []) or []
                 if CommandBit.Reverse not in bits:
-                    self.logger.info(f"[PreBattleFlip] Skip {m.name} ({pos.name}) — no Reverse available.")
                     continue
                 try:
-                    self.logger.info(f"[PreBattleFlip] Flip summon {m.name} ({pos.name})")
+                    self.logger.info(f"[Flip] Flip summon {m.name} ({pos.name})")
                     self.duel_bot_client.perform_flip_summon(pos)
                     self.duel_bot_client.handle_unexpected_prompts()
                     time.sleep(0.2)
                 except Exception as e:
-                    self.logger.warning(f"[PreBattleFlip] Flip summon failed for {m.name}: {e}")
+                    self.logger.warning(f"[Flip] Failed for {m.name}: {e}")
         except Exception as e:
-            self.logger.warning(f"[PreBattleFlip] Scan failed: {e}")
+            self.logger.warning(f"[Flip] Scan failed: {e}")
 
     def _infer_last_used_owner_and_type(self, last_used: str):
-        """Heuristic: infer from current board whether last_used belongs to which side and is a monster."""
         try:
             board = self.duel_bot_client.get_board_state()
             my_state = board.player_card_states.get(Player.Myself)
@@ -690,15 +623,12 @@ class LockdownStunBotHandler(JDuelBotHandler):
             def scan(state, player: Player):
                 if not state:
                     return None
-                # Monsters
                 for c in state.monsters or []:
                     if c and str(c.name) == last_used:
                         return player, True
-                # S/T
                 for c in state.spells_and_traps or []:
                     if c and str(c.name) == last_used:
                         return player, False
-                # Field
                 if state.field_spell and str(state.field_spell.name) == last_used:
                     return player, False
                 return None
@@ -714,10 +644,6 @@ class LockdownStunBotHandler(JDuelBotHandler):
         return None, False
 
     def _get_response_context(self):
-        """
-        Return (top_player, is_monster_effect, source) to decide chain negate.
-        Prefer get_chain_data(); if chain_data is wrong/stale, fallback to last_used + board scan.
-        """
         top_player = None
         is_monster_effect = False
         source = "none"
@@ -738,16 +664,16 @@ class LockdownStunBotHandler(JDuelBotHandler):
         try:
             last_used = self.duel_bot_client.get_last_used_card_name()
         except Exception:
-            last_used = ""
+            pass
 
         if last_used:
             inferred_player, inferred_is_monster = self._infer_last_used_owner_and_type(last_used)
-            # If chain says Myself but last_used is clearly opponent's card on field -> override to not miss II/Solemn chain
-            if inferred_player is not None and (top_player is None or top_player == Player.Myself) and inferred_player == Player.Opponent:
+            if (inferred_player is not None
+                    and (top_player is None or top_player == Player.Myself)
+                    and inferred_player == Player.Opponent):
                 top_player = Player.Opponent
                 is_monster_effect = inferred_is_monster
                 source = f"last_used:{last_used}"
-            # If no chain, use inferred
             if top_player is None and inferred_player is not None:
                 top_player = inferred_player
                 is_monster_effect = inferred_is_monster
@@ -756,30 +682,35 @@ class LockdownStunBotHandler(JDuelBotHandler):
         return top_player, is_monster_effect, source
 
     def _choose_best_action(self, valid_actions):
-        """Pick one action by priority; only Summon, Action, Set from hand; Action from field.
-        Detect opponent chain: avoid negating our own cards; prefer Solemn; II only when opponent activates monster effect."""
         if not valid_actions:
             return None
-        board_state = self.duel_bot_client.get_board_state()
-        my_state = board_state.player_card_states[Player.Myself]
-        opp_state = board_state.player_card_states.get(Player.Opponent)
+        try:
+            board_state = self.duel_bot_client.get_board_state()
+            my_state = board_state.player_card_states[Player.Myself]
+            opp_state = board_state.player_card_states.get(Player.Opponent)
+        except Exception:
+            return None
         top_player, is_monster_effect_chain, ctx_src = self._get_response_context()
         if top_player is not None:
-            self.logger.info(f"[Chain] Top player={top_player}, is_monster_effect={is_monster_effect_chain} (src={ctx_src})")
+            self.logger.info(f"[Chain] top={top_player} monster_effect={is_monster_effect_chain} (src={ctx_src})")
+
         best = None
         best_score = -1
+
         for action in valid_actions:
             card_name = action["card_name"]
             cmd = action["command_type"]
             pos = action["position"]
+
+            # From hand: only Summon, Action, Set
             if pos == CardPosition.Hand and cmd not in (CommandType.Summon, CommandType.Action, CommandType.Set):
                 continue
             if cmd == CommandType.Summon and card_name in NEVER_SUMMON:
                 continue
-            # Allow Action on field and TurnAtk (switch Defense -> Attack before attacking).
+            # From field: only Action and TurnAtk
             if pos != CardPosition.Hand and cmd not in (CommandType.Action, CommandType.TurnAtk):
                 continue
-            # Default by HAND_PRIORITY; for hand Summon: turn 1 (going first) prefer monster_stun, going second prefer highest ATK.
+
             if pos == CardPosition.Hand and cmd == CommandType.Summon:
                 atk_val = int(action.get("attack", 0) or 0)
                 try:
@@ -787,34 +718,30 @@ class LockdownStunBotHandler(JDuelBotHandler):
                 except Exception:
                     turn_num = 2
                 if turn_num == 1:
-                    # Turn 1 (going first): prefer monster_stun by HAND_PRIORITY.
-                    if card_name in MONSTER_STUN_NAMES:
-                        base_priority = 400 + HAND_PRIORITY.get(card_name, 0)
-                    else:
-                        base_priority = 300 + atk_val
+                    base_priority = (400 + HAND_PRIORITY.get(card_name, 0)
+                                     if card_name in MONSTER_STUN_NAMES
+                                     else 300 + atk_val)
                 else:
-                    # Going second or later: prefer highest ATK.
                     base_priority = 300 + atk_val
             elif cmd == CommandType.TurnAtk:
-                # Prefer switching Defense -> Attack so we can attack in Battle Phase.
                 base_priority = 250
             else:
                 base_priority = HAND_PRIORITY.get(card_name, 10)
-            # Extra Deck Mudragon: do not activate effect, use as body only
+
+            # Skip Mudragon effect
             if cmd == CommandType.Action and card_name == "Mudragon of the Swamp":
-                self.logger.info("[Mudragon] Skip Action — effect not needed, skip prompt.")
                 continue
-            # Super Polymerization: to avoid hitting our cards, only activate when opponent has >= 2 monsters on field
+
+            # Super Poly: only when opponent has >=2 monsters
             if cmd == CommandType.Action and card_name == SUPER_POLY_NAME:
-                opp_monster_count = 0
-                if opp_state:
-                    for m in (opp_state.monsters or []):
-                        if m and getattr(m, "position", None) is not None:
-                            opp_monster_count += 1
+                opp_monster_count = sum(
+                    1 for m in (opp_state.monsters or []) if m and getattr(m, "position", None) is not None
+                ) if opp_state else 0
                 if opp_monster_count < 2:
-                    self.logger.info(f"[Super Poly] Skip activation — opponent monsters={opp_monster_count} (<2).")
+                    self.logger.info(f"[Super Poly] Skip — opponent monsters={opp_monster_count}")
                     continue
-            # Artifact Lancea: do not set; only chain activate from hand when opponent is banish-deck type
+
+            # Artifact Lancea: never set; only chain-activate vs banish decks
             if pos == CardPosition.Hand and card_name == LANCEA_NAME:
                 if cmd == CommandType.Set:
                     continue
@@ -822,90 +749,84 @@ class LockdownStunBotHandler(JDuelBotHandler):
                     if top_player != Player.Opponent:
                         continue
                     if not self._opponent_is_anti_lancea_target():
-                        self.logger.info("[Lancea] Skip — opponent not banish-deck type (heuristic).")
+                        self.logger.info("[Lancea] Skip — not banish-deck matchup")
                         continue
-                    base_priority = 700  # after Solemn, before normal negate
-            # Dimension Shifter: if in hand and game offers Action, always prefer activating early.
+                    base_priority = 700
+
+            # Dimension Shifter: early activation preferred
             if pos == CardPosition.Hand and card_name == "Dimension Shifter" and cmd == CommandType.Action:
-                base_priority = 750  # higher than Lancea, lower than Solemn
-            # --- Clockwork Night / There Can Be Only One: if one is already on field (face-down or face-up),
-            #     the other must not be Set/Activated. Only block when the OTHER card is on field ---
+                base_priority = 750
+
+            # Clockwork Night / TCBOO conflict guard
             if card_name in {CLOCKWORK_NIGHT_NAME, TCBOO_NAME}:
-                conflict_on_field = False
-                for st in my_state.spells_and_traps or []:
-                    if not st:
-                        continue
-                    if st.name in {CLOCKWORK_NIGHT_NAME, TCBOO_NAME} and st.name != card_name:
-                        # Other card already on field (set or face-up) -> that rule is chosen, skip this one.
-                        conflict_on_field = True
-                        break
-                if conflict_on_field:
-                    self.logger.info(f"[Clockwork/TCBOO] Skip '{card_name}' — other conflicting card already on field.")
+                conflict = any(
+                    st and st.name in {CLOCKWORK_NIGHT_NAME, TCBOO_NAME} and st.name != card_name
+                    for st in (my_state.spells_and_traps or [])
+                )
+                if conflict:
+                    self.logger.info(f"[Conflict] Skip '{card_name}' — other conflict card on field")
                     continue
-            # --- Avoid activating duplicate Continuous Spell already on field (e.g. Clockwork Night) ---
+
+            # No second copy of Clockwork Night / Time-Tearing Morganite on field
             if pos == CardPosition.Hand and cmd == CommandType.Action and card_name in {CLOCKWORK_NIGHT_NAME, "Time-Tearing Morganite"}:
-                if any(c and c.name == card_name for c in my_state.spells_and_traps):
-                    self.logger.info(f"[Spell] Skip '{card_name}' — already on field, do not activate second copy.")
+                if any(c and c.name == card_name for c in (my_state.spells_and_traps or [])):
+                    self.logger.info(f"[Spell] Skip '{card_name}' — already on field")
                     continue
-            # --- Draw spells: use first when playing proactively (no chain) ---
+
+            # Draw spells: boost priority when no chain
             if top_player is None and cmd == CommandType.Action and card_name in DRAW_SPELL_NAMES:
                 base_priority += 100
-            # --- Unending Nightmare: activate when opponent has any face-up S/T ---
+
+            # Unending Nightmare: only activate when opponent has face-up S/T
             if cmd == CommandType.Action and card_name == UNENDING_NIGHTMARE_NAME:
                 if not self._has_opponent_faceup_spell_trap():
-                    self.logger.info(f"[Unending Nightmare] Skip activation — no face-up S/T to destroy.")
+                    self.logger.info("[Unending Nightmare] Skip — no face-up S/T target")
                     continue
-            # --- Chain logic: negate only when opponent is chain top; avoid negating our own cards ---
+
+            # Chain negate logic
             if cmd == CommandType.Action and card_name in NEGATE_TRAP_NAMES:
                 if top_player == Player.Myself:
-                    self.logger.info(f"[Negate] Skip '{card_name}' — chaining our own card, do not negate.")
+                    self.logger.info(f"[Negate] Skip '{card_name}' — chaining own card")
                     continue
                 if top_player is None:
-                    self.logger.info(f"[Negate] Skip '{card_name}' — no opponent chain, no need to negate.")
+                    self.logger.info(f"[Negate] Skip '{card_name}' — no opponent chain")
                     continue
                 if top_player == Player.Opponent:
                     if card_name in SOLEMN_NAMES:
                         base_priority = 1000
                     elif card_name == INFINITE_IMPERMANENCE_NAME:
-                        # Infinite Impermanence only used to negate opponent's MONSTER effects
                         if not is_monster_effect_chain:
-                            self.logger.info(f"[Negate] Skip '{card_name}' — opponent did not activate monster effect.")
+                            self.logger.info("[Negate] Skip Impermanence — not monster effect")
                             continue
-                        # And only when opponent has at least 1 monster on field to target
-                        has_target = False
-                        if opp_state:
-                            for m in (opp_state.monsters or []):
-                                if m and getattr(m, "position", None) is not None:
-                                    has_target = True
-                                    break
+                        has_target = opp_state and any(
+                            m and getattr(m, "position", None) is not None
+                            for m in (opp_state.monsters or [])
+                        )
                         if not has_target:
-                            self.logger.info(f"[Negate] Skip '{card_name}' — no monster on field to target, avoid stuck dialog.")
+                            self.logger.info("[Negate] Skip Impermanence — no monster target")
                             continue
                         base_priority = 500
                     elif card_name == DOMINUS_IMPULSE_NAME:
-                        # Dominus Impulse: stops Special Summon and monster effects.
-                        # Many Special Summon cards are Spell/Trap (e.g. Beetrooper Formation),
-                        # so cannot rely only on is_monster_effect_chain. Allow chaining to any opponent action.
-                        base_priority = 600  # after Solemn, before normal negate
+                        base_priority = 600
                     else:
                         base_priority = max(base_priority, 400)
-            # --- Continuous traps: always after negate; when chaining opponent, low priority ---
+
+            # Continuous traps: lower priority when chaining opponent
             if cmd == CommandType.Action and card_name in CONTINUOUS_TRAP_NAMES and top_player == Player.Opponent:
-                # Exception: Unending Nightmare on field + opponent has face-up S/T -> chain to destroy when dialog is up.
                 if card_name == UNENDING_NIGHTMARE_NAME and self._has_opponent_faceup_spell_trap():
                     base_priority = max(base_priority, 200)
                 else:
                     base_priority = min(base_priority, 50)
-                    self.logger.info(f"[Continuous] '{card_name}' — use only after negate, priority lowered to 50.")
+                    self.logger.info(f"[Continuous] '{card_name}' priority lowered to 50")
+
             if base_priority > best_score:
                 best_score = base_priority
                 best = action
+
         return best
 
     def _provide_infinite_imperm_target(self) -> bool:
-        """After activating Infinite Impermanence: pick opponent monster activating effect (chain preferred), else any monster on field."""
         try:
-            # Prefer: chain top (opponent + monster zone)
             try:
                 chain_data = self.duel_bot_client.get_chain_data()
             except Exception:
@@ -916,40 +837,34 @@ class LockdownStunBotHandler(JDuelBotHandler):
                 top_player = getattr(top, "player", None)
                 top_pos = getattr(top, "position", None)
                 if top_player == Player.Opponent and top_pos is not None:
-                    pos_val = int(top_pos)
-                    if 0 <= pos_val <= MONSTER_ZONE_POSITION_MAX:
-                        self.logger.info(f"[Infinite Impermanence] Target (chain): {top_pos.name}")
+                    if 0 <= int(top_pos) <= MONSTER_ZONE_POSITION_MAX:
+                        self.logger.info(f"[II] Target (chain): {top_pos.name}")
                         self.duel_bot_client.target_card(Player.Opponent, top_pos)
                         time.sleep(0.4)
                         return True
 
-            # Fallback: pick any opponent monster (prefer face-up first)
             opp_state = self.duel_bot_client.get_board_state().player_card_states.get(Player.Opponent)
             if not opp_state:
                 return False
-
-            any_mon = None
-            faceup_mon = None
+            faceup_mon = any_mon = None
             for m in opp_state.monsters or []:
                 if not m or getattr(m, "position", None) is None:
                     continue
                 any_mon = any_mon or m
                 if getattr(m, "face", None) == CardFace.FaceUp:
                     faceup_mon = faceup_mon or m
-
             target = faceup_mon or any_mon
             if not target:
                 return False
-            self.logger.info(f"[Infinite Impermanence] Target (fallback): {target.name} ({target.position.name})")
+            self.logger.info(f"[II] Target (fallback): {target.name} ({target.position.name})")
             self.duel_bot_client.target_card(Player.Opponent, target.position)
             time.sleep(0.4)
             return True
         except Exception as e:
-            self.logger.warning(f"[Infinite Impermanence] Target failed: {e}")
+            self.logger.warning(f"[II] Target failed: {e}")
             return False
 
     def _execute_action(self, action):
-        """Execute one action: Summon, Set, or Activate (from hand or field). Returns True on success."""
         card_name = action["card_name"]
         cmd = action["command_type"]
         idx = action["index"]
@@ -961,10 +876,11 @@ class LockdownStunBotHandler(JDuelBotHandler):
                     board = self.duel_bot_client.get_board_state()
                     free_pos = self.duel_bot_client.get_free_monster_card_zone(board)
                     if not free_pos:
-                        self.logger.warning("No free monster zone to summon.")
+                        self.logger.warning("No free monster zone.")
                         return False
                     self.duel_bot_client.normal_summon_monster(idx, free_pos)
                     self.duel_bot_client.wait_for_input_enabled()
+
                 elif cmd == CommandType.Set:
                     board = self.duel_bot_client.get_board_state()
                     card_type = action.get("type", "") or ""
@@ -972,24 +888,23 @@ class LockdownStunBotHandler(JDuelBotHandler):
                     is_field = "Field" in card_type or "Field" in card_typeline or card_name == "Necrovalley"
                     st_zone = CardPosition.Field if is_field else self.duel_bot_client.get_free_spell_or_trap_card_zone(board)
                     if not st_zone:
-                        self.logger.warning("No free S/T zone to set card.")
+                        self.logger.warning("No free S/T zone.")
                         return False
                     self.logger.info(f"Setting '{card_name}' face-down to {st_zone.name}")
                     self.duel_bot_client.execute_command(Player.Myself, CardPosition.Hand, idx, CommandType.Set)
                     self.duel_bot_client.wait_for_input_enabled()
                     self.duel_bot_client.execute_command(Player.Myself, st_zone, 0, CommandType.Decide)
                     self.duel_bot_client.wait_for_input_enabled()
+
                 elif cmd == CommandType.Action:
-                    # Hand-trap monster effects (Lancea/Shifter...) must use activate_monster_effect_from_hand
                     card_type = action.get("type", "") or ""
                     card_typeline = action.get("typeline", "") or ""
                     is_monster = "Monster" in card_type or "Monster" in card_typeline
                     if is_monster:
-                        self.logger.info(f"Activating monster effect from hand: '{card_name}'")
+                        self.logger.info(f"Monster effect from hand: '{card_name}'")
                         self.duel_bot_client.activate_monster_effect_from_hand(idx)
                         self.duel_bot_client.wait_for_input_enabled()
                         return True
-                    # Infinite Impermanence can activate from hand (when conditions met) to chain negate monster
                     if card_name == INFINITE_IMPERMANENCE_NAME:
                         self.duel_bot_client.execute_command(Player.Myself, CardPosition.Hand, idx, CommandType.Action)
                         self.duel_bot_client.wait_for_input_enabled()
@@ -1006,17 +921,16 @@ class LockdownStunBotHandler(JDuelBotHandler):
                     self.logger.info(f"Activating '{card_name}' to {target_zone.name}")
                     self.duel_bot_client.activate_spell_or_trap_from_hand(idx, target_zone)
                     if card_name == SUPER_POLY_NAME:
-                        # Super Poly will open discard cost prompt right after activation
                         self._super_poly_cost_pending_until = time.time() + 12.0
                         self._super_poly_stage = "discard"
                     self.duel_bot_client.wait_for_input_enabled()
                 else:
                     return False
+
             else:
                 if cmd == CommandType.Action:
                     self.duel_bot_client.activate_spell_or_trap_from_field(pos)
                     if card_name == UNENDING_NIGHTMARE_NAME:
-                        # After activation, game may show YES/NO prompt. Mark a short window to handle it.
                         self._unending_prompt_pending_until = time.time() + 8.0
                     if card_name == SUPER_POLY_NAME:
                         self._super_poly_cost_pending_until = time.time() + 12.0
@@ -1026,7 +940,7 @@ class LockdownStunBotHandler(JDuelBotHandler):
                         self._provide_infinite_imperm_target()
                         self.duel_bot_client.wait_for_input_enabled()
                 elif cmd == CommandType.TurnAtk:
-                    self.logger.info(f"Switch position Defense -> Attack: '{card_name}' ({pos.name})")
+                    self.logger.info(f"Switch DEF->ATK: '{card_name}' ({pos.name})")
                     self.duel_bot_client.turn_attack(pos)
                     self.duel_bot_client.wait_for_input_enabled()
                 else:
@@ -1037,30 +951,25 @@ class LockdownStunBotHandler(JDuelBotHandler):
             return False
 
     def _log_board_state_detail(self):
-        """Log hand and field for both sides in detail (for debug)."""
         try:
             board = self.duel_bot_client.get_board_state()
             for player in (Player.Myself, Player.Opponent):
-                label = "Myself" if player == Player.Myself else "Opponent"
+                label = "Me" if player == Player.Myself else "Opp"
                 state = board.player_card_states.get(player)
                 if not state:
-                    self.logger.debug(f"[Board] {label}: no state")
                     continue
                 hand_names = [c.name if c else "?" for c in state.hand]
-                self.logger.info(f"[Board] {label} Hand ({len(hand_names)}): {hand_names}")
+                self.logger.info(f"[Board] {label} Hand({len(hand_names)}): {hand_names}")
                 for i, c in enumerate(state.monsters or []):
                     if c:
-                        self.logger.info(f"[Board]   {label} Monster[{i}]: {c.name} face={getattr(c, 'face', '?')} turn={getattr(c, 'turn', '?')}")
+                        self.logger.info(f"[Board]   {label} M[{i}]: {c.name} face={getattr(c,'face','?')} turn={getattr(c,'turn','?')}")
                 for i, c in enumerate(state.spells_and_traps or []):
                     if c:
-                        self.logger.info(f"[Board]   {label} S/T[{i}]: {c.name} face={getattr(c, 'face', '?')}")
-                if state.field_spell:
-                    self.logger.info(f"[Board]   {label} Field: {state.field_spell.name}")
+                        self.logger.info(f"[Board]   {label} ST[{i}]: {c.name} face={getattr(c,'face','?')}")
         except Exception as e:
-            self.logger.warning(f"[Board] Log board state failed: {e}")
+            self.logger.warning(f"[Board] Log failed: {e}")
 
     def _log_prompt_if_inputting(self):
-        """Do not rely on dialog list; only log prompt state (is_inputting/last_used/chain)."""
         try:
             if not self.duel_bot_client.is_inputting():
                 return
@@ -1069,37 +978,15 @@ class LockdownStunBotHandler(JDuelBotHandler):
                 last_used = self.duel_bot_client.get_last_used_card_name()
             except Exception:
                 pass
-            top_player, is_monster_effect_chain, ctx_src = self._get_response_context()
+            top_player, is_monster, src = self._get_response_context()
             self.logger.info(
-                f"[Prompt] inputting=True last_used='{last_used}' chain_top={top_player} monster_effect={is_monster_effect_chain} (src={ctx_src}) super_poly_stage={getattr(self, '_super_poly_stage', 'none')}"
+                f"[Prompt] inputting=True last='{last_used}' chain_top={top_player} "
+                f"monster={is_monster} (src={src}) sp_stage={getattr(self,'_super_poly_stage','none')}"
             )
-
-            # Log currently activatable (Action) options on board/hand (no dialog list)
-            try:
-                board = self.duel_bot_client.get_board_state()
-                my_state = board.player_card_states.get(Player.Myself)
-                if my_state:
-                    activatable = []
-                    # Hand
-                    for i, c in enumerate(my_state.hand or []):
-                        if c and CommandBit.Action in (getattr(c, "command_bits", []) or []):
-                            activatable.append(f"Hand[{i}]:{c.name}")
-                    # Field monsters + S/T
-                    for c in (my_state.monsters or []):
-                        if c and CommandBit.Action in (getattr(c, "command_bits", []) or []):
-                            activatable.append(f"{c.position.name}:{c.name}")
-                    for c in (my_state.spells_and_traps or []):
-                        if c and CommandBit.Action in (getattr(c, "command_bits", []) or []):
-                            activatable.append(f"{c.position.name}:{c.name}")
-                    if activatable:
-                        self.logger.info(f"[Prompt] Activatable(Action) now: {activatable}")
-            except Exception:
-                pass
         except Exception as e:
             self.logger.warning(f"[Prompt] Log failed: {e}")
 
     def _handle_pot_of_duality_dialog(self):
-        """After activating Pot of Duality, game opens 3-card dialog — pick one by priority (rest without dialog)."""
         try:
             if not self.duel_bot_client.is_inputting():
                 return
@@ -1108,11 +995,11 @@ class LockdownStunBotHandler(JDuelBotHandler):
                 return
             cards = self.duel_bot_client.get_dialog_card_list()
             if len(cards) != 3:
-                self.logger.warning(f"[Pot of Duality] Dialog does not have 3 cards: {len(cards)} -> {cards}")
+                self.logger.warning(f"[PoD] Unexpected card count: {len(cards)}")
                 return
             best = max(cards, key=lambda c: HAND_PRIORITY.get(str(c), 0))
             idx = cards.index(best) if best in cards else 0
-            self.logger.info(f"[Pot of Duality] Pick 1/3 from dialog -> '{best}' (index={idx})")
+            self.logger.info(f"[PoD] Pick '{best}' (index={idx})")
             self.duel_bot_client.select_card_from_dialog(
                 CardSelection(card_index=idx),
                 dialog_button_type=DialogButtonType.Middle,
@@ -1120,64 +1007,37 @@ class LockdownStunBotHandler(JDuelBotHandler):
             )
             self.duel_bot_client.wait_for_input_enabled()
         except Exception as e:
-            self.logger.warning(f"[Pot of Duality] Dialog card selection failed: {e}")
-            self.duel_bot_client.cancel_activation_prompts()
+            self.logger.warning(f"[PoD] Dialog failed: {e}")
+            try:
+                self.duel_bot_client.cancel_activation_prompts()
+            except Exception:
+                pass
 
     def _handle_pot_of_extravagance_dialog(self):
-        """After activating Pot of Extravagance, dialog asks for 3 or 6.
-        Prefer 6 (banish more; this deck does not rely on Extra)."""
         try:
             if not self.duel_bot_client.is_inputting():
                 return
-            # Brief wait for UI to settle
             time.sleep(0.4)
             if not self.duel_bot_client.is_inputting():
                 return
-
-            # Dialog 3/6 is a list with 2 option rows, not card list.
-            # At 1280x720 we click by coordinates: pick 6 cards (second row), then OK button.
-            three_option = Coordinates(610, 270)  # second row "6 card(s)"
-            six_option = Coordinates(610, 320)   # second row "6 card(s)"
-            ok_button = Coordinates(640, 540)    # OK button
-
-            self.logger.info("[Pot of Extravagance] Click 6 cards option by coordinates.")
-            try:
-                self.duel_bot_client.simulate_click(six_option)
-                time.sleep(0.2)
-                self.duel_bot_client.simulate_click(ok_button)
-                self.duel_bot_client.wait_for_input_enabled()
-            except Exception as e:
-                self.logger.warning(f"[Pot of Extravagance] Coordinate click failed: {e}")
-
-            # If still in dialog after click, cancel to avoid lock.
+            six_option = Coordinates(610, 320)
+            ok_button = Coordinates(640, 540)
+            self.logger.info("[PoE] Clicking 6 cards option")
+            self.duel_bot_client.simulate_click(six_option)
+            time.sleep(0.2)
+            self.duel_bot_client.simulate_click(ok_button)
+            self.duel_bot_client.wait_for_input_enabled()
             if self.duel_bot_client.is_inputting():
-                self.logger.warning("[Pot of Extravagance] Still inputting after coordinate clicks -> cancel dialog to avoid lock.")
+                self.logger.warning("[PoE] Still inputting -> cancelling")
                 self.duel_bot_client.cancel_activation_prompts()
         except Exception as e:
-            self.logger.warning(f"[Pot of Extravagance] Dialog 3/6 selection failed: {e}")
-            self.duel_bot_client.cancel_activation_prompts()
-
-    def _has_opponent_continuous_or_field_faceup(self):
-        """Does opponent have any face-up Continuous or Field S/T?"""
-        try:
-            opp_state = self.duel_bot_client.get_board_state().player_card_states.get(Player.Opponent)
-            if not opp_state:
-                return False
-            for st in opp_state.spells_and_traps or []:
-                if not st or st.face != CardFace.FaceUp:
-                    continue
-                t = str(getattr(st, "type", "") or "")
-                tl = str(getattr(st, "typeline", "") or "")
-                if "Continuous" in t or "Continuous" in tl or "Field" in t or "Field" in tl:
-                    return True
-            if opp_state.field_spell and opp_state.field_spell.face == CardFace.FaceUp:
-                return True
-        except Exception:
-            pass
-        return False
+            self.logger.warning(f"[PoE] Dialog failed: {e}")
+            try:
+                self.duel_bot_client.cancel_activation_prompts()
+            except Exception:
+                pass
 
     def _has_opponent_faceup_spell_trap(self):
-        """Does opponent have any face-up S/T? (Unending Nightmare targets 1 face-up S/T.)"""
         try:
             opp_state = self.duel_bot_client.get_board_state().player_card_states.get(Player.Opponent)
             if not opp_state:
@@ -1192,7 +1052,6 @@ class LockdownStunBotHandler(JDuelBotHandler):
         return False
 
     def _provide_unending_nightmare_target(self):
-        """Pick target: 1 face-up S/T of opponent (Unending Nightmare destroys 1 face-up S/T)."""
         try:
             opp_state = self.duel_bot_client.get_board_state().player_card_states.get(Player.Opponent)
             if not opp_state:
@@ -1200,31 +1059,23 @@ class LockdownStunBotHandler(JDuelBotHandler):
             for st in opp_state.spells_and_traps or []:
                 if not st or st.face != CardFace.FaceUp:
                     continue
-                self.logger.info(f"[Unending Nightmare] Target: {st.name} ({st.position.name})")
+                self.logger.info(f"[UN] Target: {st.name} ({st.position.name})")
                 self.duel_bot_client.target_card(Player.Opponent, st.position)
                 time.sleep(1.0)
                 return True
             if opp_state.field_spell and opp_state.field_spell.face == CardFace.FaceUp:
-                self.logger.info(f"[Unending Nightmare] Target Field: {opp_state.field_spell.name}")
+                self.logger.info(f"[UN] Target Field: {opp_state.field_spell.name}")
                 self.duel_bot_client.target_card(Player.Opponent, CardPosition.Field)
                 time.sleep(1.0)
                 return True
         except Exception as e:
-            self.logger.warning(f"[Unending Nightmare] Target failed: {e}")
+            self.logger.warning(f"[UN] Target failed: {e}")
         return False
 
     def _handle_unending_nightmare_prompt(self) -> bool:
-        """
-        Do not use dialog list.
-        - First Unending Nightmare activation has YES/NO: only YES if opponent has face-up S/T.
-        - Later activations ask for target directly -> pick target (no YES/NO).
-        Returns True if Unending Nightmare-related prompt was handled.
-        """
         try:
             if not self.duel_bot_client.is_inputting():
                 return False
-            # Only handle if we recently ACTIVATED Unending Nightmare (Action),
-            # not when we just Set it (Set can still make last_used == name).
             if time.time() > float(getattr(self, "_unending_prompt_pending_until", 0.0) or 0.0):
                 return False
             last_used = ""
@@ -1236,11 +1087,8 @@ class LockdownStunBotHandler(JDuelBotHandler):
                 return False
 
             has_target = self._has_opponent_faceup_spell_trap()
-
-            # If no target but still prompting, likely first-time YES/NO -> cancel prompt.
             if not has_target:
-                self.logger.info("[Unending Nightmare] Cancel (no face-up S/T to destroy)")
-                # Try cancelling prompt directly instead of spamming NO (avoid infinite loop).
+                self.logger.info("[UN] Cancel (no face-up S/T)")
                 try:
                     self.duel_bot_client.cancel_activation_prompts()
                     self.duel_bot_client.wait_for_input_enabled()
@@ -1249,19 +1097,16 @@ class LockdownStunBotHandler(JDuelBotHandler):
                 self._unending_prompt_pending_until = 0.0
                 return True
 
-            # Has target: first-time flow -> click YES then select target.
-            self.logger.info("[Unending Nightmare] YES (has face-up S/T) then select target")
+            self.logger.info("[UN] YES then select target")
             try:
-                # YES button
-                self.duel_bot_client.simulate_click(Coordinates(741, 425))
+                self.duel_bot_client.simulate_click(_YES_COORD)
                 self.duel_bot_client.wait_for_input_enabled()
                 time.sleep(0.3)
             except Exception:
                 pass
-
             if self.duel_bot_client.is_inputting():
                 if not self._provide_unending_nightmare_target():
-                    self.logger.warning("[Unending Nightmare] No target found to destroy.")
+                    self.logger.warning("[UN] No target found.")
             try:
                 self.duel_bot_client.wait_for_input_enabled()
             except Exception:
@@ -1269,65 +1114,109 @@ class LockdownStunBotHandler(JDuelBotHandler):
             self._unending_prompt_pending_until = 0.0
             return True
         except Exception as e:
-            self.logger.warning(f"[Unending Nightmare] Prompt handle failed: {e}")
+            self.logger.warning(f"[UN] Prompt failed: {e}")
             return False
 
+    # ===== Main turn logic =====
+
     def play_turn(self):
-        """Play Main Phase: repeatedly choose and execute best action until none or max iterations."""
-        max_actions = 20
+        """
+        Repeatedly choose and execute the best available action until none remain
+        or the safety cap is reached. Each iteration refreshes board state so that
+        newly available actions (e.g. setting a trap after summoning a monster)
+        are always considered.
+        """
+        max_actions = 30
         actions_taken = 0
-        failed_actions = set()
+        failed_actions: set = set()
+        consecutive_no_action = 0
+
         self._log_board_state_detail()
+
         while actions_taken < max_actions:
+            # --- Handle any pending multi-step prompts first ---
+            handled_prompt = (
+                self._handle_super_poly_discard_prompt()
+                or self._handle_super_poly_fusion_prompt()
+                or self._handle_super_poly_material_prompt()
+                or self._handle_faceup_position_prompt()
+                or self._handle_summon_zone_prompt()
+            )
+            if handled_prompt:
+                consecutive_no_action = 0
+                continue
+
             self._log_prompt_if_inputting()
-            if self._handle_super_poly_discard_prompt():
+
+            # --- Collect available actions ---
+            try:
+                valid_raw = self._get_all_valid_actions()
+            except Exception as e:
+                self.logger.warning(f"[Turn] get_all_valid_actions error: {e}")
+                time.sleep(0.5)
                 continue
-            if self._handle_super_poly_fusion_prompt():
-                continue
-            if self._handle_super_poly_material_prompt():
-                continue
-            if self._handle_faceup_position_prompt():
-                continue
-            if self._handle_summon_zone_prompt():
-                continue
-            valid_raw = self._get_all_valid_actions()
+
             valid = self._filter_set_duplicates(valid_raw)
-            valid = [a for a in valid if (a["card_name"], a["command_type"], a["index"], a["position"]) not in failed_actions]
+            valid = [
+                a for a in valid
+                if (a["card_name"], a["command_type"], a["index"], a["position"]) not in failed_actions
+            ]
+
             best = self._choose_best_action(valid)
+
             if best is None:
+                # No action chosen — handle any remaining prompts then break
                 if self.duel_bot_client.is_inputting():
-                    if self._handle_super_poly_discard_prompt():
+                    handled = (
+                        self._handle_super_poly_discard_prompt()
+                        or self._handle_super_poly_fusion_prompt()
+                        or self._handle_super_poly_material_prompt()
+                        or self._handle_faceup_position_prompt()
+                        or self._handle_summon_zone_prompt()
+                        or self._handle_unending_nightmare_prompt()
+                    )
+                    if handled:
+                        consecutive_no_action = 0
                         continue
-                    if self._handle_super_poly_fusion_prompt():
-                        continue
-                    if self._handle_super_poly_material_prompt():
-                        continue
-                    if self._handle_faceup_position_prompt():
-                        continue
-                    if self._handle_summon_zone_prompt():
-                        continue
-                    if self._handle_unending_nightmare_prompt():
-                        continue
-                    self.logger.info("No action chosen (e.g. do not chain negate our own card) — cancel dialog.")
+                    self.logger.info("[Turn] No action — cancelling dialog.")
                     self.duel_bot_client.cancel_activation_prompts()
                     time.sleep(0.3)
-                self.logger.info("No more playable actions. Ending turn.")
-                break
+
+                consecutive_no_action += 1
+                if consecutive_no_action >= 2:
+                    self.logger.info("[Turn] No more playable actions. Ending turn.")
+                    break
+                # Give the game one more chance to present new options
+                time.sleep(0.4)
+                continue
+
+            consecutive_no_action = 0
+
             if self._execute_action(best) is False:
                 failed_actions.add((best["card_name"], best["command_type"], best["index"], best["position"]))
-                self.logger.warning(f"Action failed, blacklisting for this turn: {best['action_name']} on {best['card_name']}")
+                self.logger.warning(f"[Turn] Action failed, blacklisting: {best['action_name']} on {best['card_name']}")
                 continue
+
+            # Handle post-activation dialogs immediately
             if best["card_name"] == POT_OF_DUALITY_NAME:
                 self._handle_pot_of_duality_dialog()
             elif best["card_name"] == POT_OF_EXTRAVAGANCE_NAME:
                 self._handle_pot_of_extravagance_dialog()
+
             actions_taken += 1
-            self.logger.info(f"Actions taken this turn: {actions_taken}")
-            time.sleep(0.5)
+            self.logger.info(f"[Turn] Actions taken: {actions_taken}")
+
+            # Brief pause to let animations finish before querying the board again
+            time.sleep(0.4)
             self._log_prompt_if_inputting()
-            if self.duel_bot_client.cancel_activation_prompts():
-                pass
-        self.logger.info(f"Turn complete. Total actions: {actions_taken}")
+
+            # Only cancel lingering activation prompts — not the turn itself
+            if self.duel_bot_client.is_inputting():
+                top_player, _, _ = self._get_response_context()
+                if top_player != Player.Opponent:
+                    self.duel_bot_client.cancel_activation_prompts()
+
+        self.logger.info(f"[Turn] Complete. Total actions: {actions_taken}")
 
     def handle_my_main_phase_1(self):
         self.duel_bot_client.cancel_activation_prompts()
@@ -1338,7 +1227,6 @@ class LockdownStunBotHandler(JDuelBotHandler):
         if turn == 1:
             self.duel_bot_client.move_phase(Phase.End)
         else:
-            # Before entering Battle, try to flip our face-down monsters (if allowed).
             self._try_flip_my_facedown_monsters()
             self.duel_bot_client.move_phase(Phase.Battle)
 
@@ -1350,190 +1238,167 @@ class LockdownStunBotHandler(JDuelBotHandler):
         self.duel_bot_client.move_phase(Phase.End)
 
     def handle_my_battle_phase(self):
-        """Battle Phase: attack automatically when possible."""
-        self.logger.info("Handling battle phase...")
+        self.logger.info("[Battle] Starting...")
         self.duel_bot_client.handle_unexpected_prompts()
 
         try:
             board = self.duel_bot_client.get_board_state()
             my_state = board.player_card_states.get(Player.Myself)
             opp_state = board.player_card_states.get(Player.Opponent)
-
             my_monsters = (my_state.monsters if my_state else []) or []
             opp_monsters = (opp_state.monsters if opp_state else []) or []
 
-            opp_targets = []
-            for om in opp_monsters:
-                if om is None:
-                    continue
-                cid = getattr(om, "id", 0)
-                if cid is None or cid == 0:
-                    continue
-                opp_targets.append(getattr(om, "position", None))
+            opp_targets = [
+                getattr(om, "position", None)
+                for om in opp_monsters
+                if om is not None and (getattr(om, "id", 0) or 0) != 0
+            ]
 
-            # For each of our monsters, try to attack if game allows (CommandBit.Attack)
             for m in my_monsters:
-                if m is None:
-                    continue
-                cid = getattr(m, "id", 0)
-                if cid is None or cid == 0:
+                if m is None or (getattr(m, "id", 0) or 0) == 0:
                     continue
                 if getattr(m, "face", None) == CardFace.FaceDown:
                     continue
                 if getattr(m, "turn", None) != CardTurn.Attack:
                     continue
-                bits = getattr(m, "command_bits", []) or []
-                if CommandBit.Attack not in bits:
-                    self.logger.info(f"[Battle] Skip attack with {m.name} ({getattr(m, 'position', None)}) — no Attack command available.")
+                if CommandBit.Attack not in (getattr(m, "command_bits", []) or []):
+                    self.logger.info(f"[Battle] Skip {m.name} — no Attack command")
                     continue
 
                 attacker_pos = getattr(m, "position", None)
                 if attacker_pos is None:
                     continue
 
-                # Prefer attacking opponent monster if any, else direct attack
                 target_pos = None
                 target_card = None
                 for om in opp_monsters:
                     if om is None:
                         continue
                     tp = getattr(om, "position", None)
-                    if tp is None:
-                        continue
-                    if tp in opp_targets:
+                    if tp is not None and tp in opp_targets:
                         target_pos = tp
                         target_card = om
                         break
 
                 try:
-                    # If opponent has face-up ATK higher than ours, do not attack into it (avoid suicide).
                     if target_card is not None:
-                        my_atk = getattr(m, "attack", None)
-                        if my_atk is None:
-                            my_atk = getattr(m, "atk", None)
-                        opp_atk = getattr(target_card, "attack", None)
-                        if opp_atk is None:
-                            opp_atk = getattr(target_card, "atk", None)
+                        my_atk = getattr(m, "attack", None) or getattr(m, "atk", None)
+                        opp_atk = getattr(target_card, "attack", None) or getattr(target_card, "atk", None)
                         opp_turn = getattr(target_card, "turn", None)
-                        if (
-                            isinstance(my_atk, int)
-                            and isinstance(opp_atk, int)
-                            and my_atk < opp_atk
-                            and opp_turn == CardTurn.Attack
-                        ):
+                        if (isinstance(my_atk, int) and isinstance(opp_atk, int)
+                                and my_atk < opp_atk and opp_turn == CardTurn.Attack):
                             self.logger.info(
-                                f"[Battle] Skip attack with {m.name} ({attacker_pos.name}) into stronger {target_card.name} "
-                                f"(my ATK={my_atk} < opp ATK={opp_atk})."
+                                f"[Battle] Skip suicide attack {m.name} ({my_atk}) vs {target_card.name} ({opp_atk})"
                             )
-                            raise RuntimeError("Skip suicidal attack")
+                            continue
 
                     if target_pos is None:
-                        self.logger.info(f"[Battle] Direct attack with {m.name} ({attacker_pos.name})")
+                        self.logger.info(f"[Battle] Direct attack with {m.name}")
                         self.duel_bot_client.declare_attack(attacker_pos, None)
                     else:
-                        self.logger.info(
-                            f"[Battle] Attack {target_pos.name} with {m.name} ({attacker_pos.name})"
-                        )
+                        self.logger.info(f"[Battle] Attack {target_pos.name} with {m.name}")
                         self.duel_bot_client.declare_attack(attacker_pos, target_pos)
+
                     self.duel_bot_client.wait_for_input_enabled()
                     self.duel_bot_client.handle_unexpected_prompts()
-                    # Slightly longer delay between attacks so player can see animation.
                     time.sleep(0.8)
-                    # In Battle: if game opens prompt after attack:
-                    # - If chain top is our card -> cancel (do not activate our effect during attack).
-                    # - If chain top is opponent's -> leave it so we can chain negate/respond.
-                    # Always log prompt when present.
                     self._log_prompt_if_inputting()
+
                     if self.duel_bot_client.is_inputting():
-                        top_player, is_monster_effect_chain, ctx_src = self._get_response_context()
+                        top_player, _, _ = self._get_response_context()
                         if top_player != Player.Opponent:
-                            self.logger.info("[Battle] Cancel own activation prompt during attack.")
+                            self.logger.info("[Battle] Cancel own prompt during attack")
                             self.duel_bot_client.cancel_activation_prompts()
                             time.sleep(0.2)
+
                 except Exception as e:
                     self.logger.warning(f"[Battle] Attack failed for {m.name}: {e}")
                     continue
 
         except Exception as e:
-            self.logger.warning(f"[Battle] Battle phase logic error: {e}")
+            self.logger.warning(f"[Battle] Phase error: {e}")
 
         self.duel_bot_client.cancel_activation_prompts()
         time.sleep(0.3)
-        self.logger.info("Ending Battle -> Main Phase 2")
+        self.logger.info("[Battle] -> Main Phase 2")
         self.duel_bot_client.move_phase(Phase.Main2)
 
     def handle_opponents_turn(self):
-        """Opponent's turn: handle special dialogs, then if still prompting (chain?) try to chain negate by rules."""
+        """Opponent's turn: handle special dialogs and chain-negate when appropriate."""
         self.duel_bot_client.handle_unexpected_prompts()
-        if self.duel_bot_client.is_inputting():
-            self._log_prompt_if_inputting()
-            # If at target-selection prompt for Infinite Impermanence (already activated),
-            # try to auto-select target again to avoid stuck dialog.
-            try:
-                last_used = self.duel_bot_client.get_last_used_card_name()
-            except Exception:
-                last_used = ""
-            if last_used == INFINITE_IMPERMANENCE_NAME:
-                top_player, is_monster_effect_chain, ctx_src = self._get_response_context()
-                if top_player == Player.Opponent and is_monster_effect_chain:
-                    if self._provide_infinite_imperm_target():
-                        self.duel_bot_client.wait_for_input_enabled()
-                        if not self.duel_bot_client.is_inputting():
-                            return
-            if self._handle_super_poly_discard_prompt():
-                return
-            if self._handle_super_poly_material_prompt():
-                return
-            if self._handle_super_poly_fusion_prompt():
-                return
-            if self._handle_faceup_position_prompt():
-                return
-            if self._handle_summon_zone_prompt():
-                return
-            if self._try_activate_lancea_if_available():
-                return
+        if not self.duel_bot_client.is_inputting():
+            self.duel_bot_client.cancel_activation_prompts()
+            return
+
+        self._log_prompt_if_inputting()
+
+        # Re-target Infinite Impermanence if already activated
+        try:
+            last_used = self.duel_bot_client.get_last_used_card_name()
+        except Exception:
+            last_used = ""
+        if last_used == INFINITE_IMPERMANENCE_NAME:
+            top_player, is_monster, _ = self._get_response_context()
+            if top_player == Player.Opponent and is_monster:
+                if self._provide_infinite_imperm_target():
+                    self.duel_bot_client.wait_for_input_enabled()
+                    if not self.duel_bot_client.is_inputting():
+                        return
+
+        # Multi-stage Super Poly prompts
+        if (self._handle_super_poly_discard_prompt()
+                or self._handle_super_poly_material_prompt()
+                or self._handle_super_poly_fusion_prompt()
+                or self._handle_faceup_position_prompt()
+                or self._handle_summon_zone_prompt()):
+            return
+
+        # Lancea vs banish decks
+        if self._try_activate_lancea_if_available():
+            return
+
+        # Chain negate: only Action commands on opponent's turn
+        try:
             valid_raw = self._get_all_valid_actions()
-            valid = [a for a in valid_raw if a["command_type"] == CommandType.Action]
-            valid = self._filter_set_duplicates(valid)
-            best = self._choose_best_action(valid)
-            if best:
-                self.logger.info(f"[Opponent turn] Chain negate: {best['card_name']}")
-                self._execute_action(best)
-                if best["card_name"] == UNENDING_NIGHTMARE_NAME:
-                    self._handle_unending_nightmare_prompt()
-                self.duel_bot_client.wait_for_input_enabled()
-            else:
-                if self._handle_super_poly_discard_prompt():
-                    return
-                if self._handle_super_poly_material_prompt():
-                    return
-                if self._handle_faceup_position_prompt():
-                    return
-                if self._handle_summon_zone_prompt():
-                    return
+        except Exception:
+            valid_raw = []
+        valid = [a for a in valid_raw if a["command_type"] == CommandType.Action]
+        valid = self._filter_set_duplicates(valid)
+        best = self._choose_best_action(valid)
+
+        if best:
+            self.logger.info(f"[OppTurn] Chain negate: {best['card_name']}")
+            self._execute_action(best)
+            if best["card_name"] == UNENDING_NIGHTMARE_NAME:
                 self._handle_unending_nightmare_prompt()
-                if self.duel_bot_client.is_inputting():
-                    self.duel_bot_client.cancel_activation_prompts()
+            self.duel_bot_client.wait_for_input_enabled()
+        else:
+            if (self._handle_super_poly_discard_prompt()
+                    or self._handle_super_poly_material_prompt()
+                    or self._handle_faceup_position_prompt()
+                    or self._handle_summon_zone_prompt()):
+                return
+            self._handle_unending_nightmare_prompt()
+            if self.duel_bot_client.is_inputting():
+                self.duel_bot_client.cancel_activation_prompts()
+
         self.duel_bot_client.cancel_activation_prompts()
 
 
-
-
-
 if __name__ == "__main__":
-    # Reset log file (truncate) on each run for easier reading from start
     import os
     _log_path = get_log_filename(__file__)
     if os.path.isfile(_log_path):
         with open(_log_path, "w", encoding="utf-8") as _f:
             _f.write("")
+
     logger_manager = LoggerManager(__file__)
     logger = logger_manager.get_logger()
 
     duel_bot_client = JDuelBotClient(master_duel_connection_address)
     duel_bot = LockdownStunBotHandler(duel_bot_client, logger)
 
-    logger.info("Bot is running. Keep the game in foreground.")
+    logger.info("Stun bot running. Press Ctrl+C to stop.")
     try:
         duel_bot.run()
     except KeyboardInterrupt:
