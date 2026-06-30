@@ -1119,7 +1119,7 @@ class LockdownStunBotHandler(JDuelBotHandler):
 
     # ===== Main turn logic =====
 
-    def _try_play_card_from_hand(self, board_state, my_state, normal_summon_done: bool):
+    def _try_play_card_from_hand(self, board_state, my_state, normal_summon_done: bool, played_names: set | None = None):
         """
         Attempt to play the highest-priority card from hand based on card type.
         Does NOT rely on command_bits (which are only populated when the game's
@@ -1138,6 +1138,9 @@ class LockdownStunBotHandler(JDuelBotHandler):
         names_on_field = {c.name for c in (my_state.spells_and_traps or []) if c}
         if my_state.field_spell:
             names_on_field.add(my_state.field_spell.name)
+
+        if played_names is None:
+            played_names = set()
 
         # Build hand list with priority score
         hand_cards = [
@@ -1172,6 +1175,7 @@ class LockdownStunBotHandler(JDuelBotHandler):
                     self.logger.info(f"[Summon] Normal summoning '{card.name}' to {free_pos.name}")
                     self.duel_bot_client.normal_summon_monster(idx, free_pos)
                     self.duel_bot_client.wait_for_input_enabled()
+                    played_names.add(card.name)
                     return "summon"
                 except Exception as e:
                     self.logger.warning(f"[Summon] Failed '{card.name}': {e}")
@@ -1200,6 +1204,10 @@ class LockdownStunBotHandler(JDuelBotHandler):
             )
             is_normal_or_quickplay_spell = not is_trap and not is_field and not is_continuous_spell
 
+            # Skip if already played this turn (game may lag in removing from hand display)
+            if card.name in played_names:
+                continue
+
             # Skip duplicate on field unless allowed
             if card.name in names_on_field and card.name not in SET_ALLOW_DUPLICATE_NAMES:
                 self.logger.info(f"[Skip] '{card.name}' already on field")
@@ -1226,6 +1234,7 @@ class LockdownStunBotHandler(JDuelBotHandler):
                     self.logger.info(f"[Set] Setting trap '{card.name}' to {free_st.name}")
                     self.duel_bot_client.set_spell_or_trap_from_hand(idx, free_st)
                     self.duel_bot_client.wait_for_input_enabled()
+                    played_names.add(card.name)
                     return True
                 except Exception as e:
                     self.logger.warning(f"[Set] Failed '{card.name}': {e}")
@@ -1236,6 +1245,7 @@ class LockdownStunBotHandler(JDuelBotHandler):
                     self.logger.info(f"[Field] Activating field spell '{card.name}'")
                     self.duel_bot_client.activate_spell_or_trap_from_hand(idx, CardPosition.Field)
                     self.duel_bot_client.wait_for_input_enabled()
+                    played_names.add(card.name)
                     return True
                 except Exception as e:
                     self.logger.warning(f"[Field] Failed '{card.name}': {e}")
@@ -1253,6 +1263,7 @@ class LockdownStunBotHandler(JDuelBotHandler):
                         self._super_poly_cost_pending_until = time.time() + 12.0
                         self._super_poly_stage = "discard"
                         self.duel_bot_client.wait_for_input_enabled()
+                        played_names.add(card.name)
                         return True
                     except Exception as e:
                         self.logger.warning(f"[Super Poly] Activate failed: {e}")
@@ -1266,6 +1277,7 @@ class LockdownStunBotHandler(JDuelBotHandler):
                         self.logger.info(f"[Super Poly] Setting face-down (opp monsters={opp_monster_count})")
                         self.duel_bot_client.set_spell_or_trap_from_hand(idx, free_st)
                         self.duel_bot_client.wait_for_input_enabled()
+                        played_names.add(card.name)
                         return True
                     except Exception as e:
                         self.logger.warning(f"[Super Poly] Set failed: {e}")
@@ -1286,6 +1298,7 @@ class LockdownStunBotHandler(JDuelBotHandler):
                         self._handle_pot_of_duality_dialog()
                     elif card.name == POT_OF_EXTRAVAGANCE_NAME:
                         self._handle_pot_of_extravagance_dialog()
+                    played_names.add(card.name)
                     return True
                 except Exception as e:
                     self.logger.warning(f"[Spell] Failed '{card.name}': {e}")
@@ -1301,6 +1314,7 @@ class LockdownStunBotHandler(JDuelBotHandler):
         max_actions = 20
         actions_taken = 0
         normal_summon_done = False
+        played_names: set[str] = set()
 
         self._log_board_state_detail()
         # Brief pause to let the game settle into Main Phase
@@ -1323,7 +1337,7 @@ class LockdownStunBotHandler(JDuelBotHandler):
                 time.sleep(0.5)
                 break
 
-            result = self._try_play_card_from_hand(board_state, my_state, normal_summon_done)
+            result = self._try_play_card_from_hand(board_state, my_state, normal_summon_done, played_names)
 
             if result == "summon":
                 normal_summon_done = True
