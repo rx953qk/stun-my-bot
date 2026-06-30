@@ -1119,102 +1119,224 @@ class LockdownStunBotHandler(JDuelBotHandler):
 
     # ===== Main turn logic =====
 
+    def _try_play_card_from_hand(self, board_state, my_state, normal_summon_done: bool):
+        """
+        Attempt to play the highest-priority card from hand based on card type.
+        Does NOT rely on command_bits (which are only populated when the game's
+        command UI is active — i.e. when a card is tapped). Instead we determine
+        the correct action from card type/level and call the API directly.
+
+        Returns: "summon" if a normal summon was performed,
+                 True if another action was taken,
+                 False if nothing could be played.
+        """
+        try:
+            turn = self.duel_bot_client.get_turn_number()
+        except Exception:
+            turn = 1
+
+        names_on_field = {c.name for c in (my_state.spells_and_traps or []) if c}
+        if my_state.field_spell:
+            names_on_field.add(my_state.field_spell.name)
+
+        # Build hand list with priority score
+        hand_cards = [
+            (i, c) for i, c in enumerate(my_state.hand) if c and getattr(c, "name", None)
+        ]
+
+        # ---- 1. Normal summon: attempt once per turn ----
+        if not normal_summon_done:
+            monster_candidates = [
+                (i, c) for i, c in hand_cards
+                if "Monster" in str(getattr(c, "type", "") or "")
+                and c.name not in NEVER_SUMMON
+                and getattr(c, "level", 5) <= 4
+            ]
+            # Turn 1 going first: prefer stun monsters by priority; otherwise highest ATK
+            if turn == 1:
+                monster_candidates.sort(
+                    key=lambda ic: -(HAND_PRIORITY.get(ic[1].name, 0)
+                                     if ic[1].name in MONSTER_STUN_NAMES
+                                     else getattr(ic[1], "atk", 0) or 0)
+                )
+            else:
+                monster_candidates.sort(key=lambda ic: -(getattr(ic[1], "atk", 0) or 0))
+
+            for idx, card in monster_candidates:
+                try:
+                    board_fresh = self.duel_bot_client.get_board_state()
+                    free_pos = self.duel_bot_client.get_free_monster_card_zone(board_fresh)
+                    if not free_pos:
+                        self.logger.warning("[Summon] No free monster zone")
+                        break
+                    self.logger.info(f"[Summon] Normal summoning '{card.name}' to {free_pos.name}")
+                    self.duel_bot_client.normal_summon_monster(idx, free_pos)
+                    self.duel_bot_client.wait_for_input_enabled()
+                    return "summon"
+                except Exception as e:
+                    self.logger.warning(f"[Summon] Failed '{card.name}': {e}")
+
+        # ---- 2. Spells and traps sorted by priority ----
+        opp_state = board_state.player_card_states.get(Player.Opponent)
+        opp_monster_count = sum(
+            1 for m in (opp_state.monsters or []) if m and getattr(m, "position", None) is not None
+        ) if opp_state else 0
+
+        spell_trap_candidates = [
+            (i, c) for i, c in hand_cards
+            if "Monster" not in str(getattr(c, "type", "") or "")
+            and c.name not in NEVER_SET_FROM_HAND
+        ]
+        spell_trap_candidates.sort(key=lambda ic: -HAND_PRIORITY.get(ic[1].name, 0))
+
+        for idx, card in spell_trap_candidates:
+            card_type = str(getattr(card, "type", "") or "")
+            card_typeline = str(getattr(card, "typeline", "") or "")
+            is_trap = "Trap" in card_type
+            is_field = "Field" in card_type or "Field" in card_typeline or card.name == "Necrovalley"
+            is_continuous_spell = (
+                not is_trap
+                and ("Continuous" in card_type or "Continuous" in card_typeline)
+            )
+            is_normal_or_quickplay_spell = not is_trap and not is_field and not is_continuous_spell
+
+            # Skip duplicate on field unless allowed
+            if card.name in names_on_field and card.name not in SET_ALLOW_DUPLICATE_NAMES:
+                self.logger.info(f"[Skip] '{card.name}' already on field")
+                continue
+
+            # Clockwork Night / TCBOO conflict guard
+            if card.name in {CLOCKWORK_NIGHT_NAME, TCBOO_NAME}:
+                conflict = any(
+                    c and c.name in {CLOCKWORK_NIGHT_NAME, TCBOO_NAME} and c.name != card.name
+                    for c in (my_state.spells_and_traps or [])
+                )
+                if conflict:
+                    self.logger.info(f"[Skip] '{card.name}' — conflict card already on field")
+                    continue
+
+            if is_trap:
+                # All traps are set face-down during our main phase
+                try:
+                    board_fresh = self.duel_bot_client.get_board_state()
+                    free_st = self.duel_bot_client.get_free_spell_or_trap_card_zone(board_fresh)
+                    if not free_st:
+                        self.logger.warning(f"[Set] No free S/T zone for '{card.name}'")
+                        continue
+                    self.logger.info(f"[Set] Setting trap '{card.name}' to {free_st.name}")
+                    self.duel_bot_client.set_spell_or_trap_from_hand(idx, free_st)
+                    self.duel_bot_client.wait_for_input_enabled()
+                    return True
+                except Exception as e:
+                    self.logger.warning(f"[Set] Failed '{card.name}': {e}")
+
+            elif is_field:
+                # Field spells activate directly to the field zone
+                try:
+                    self.logger.info(f"[Field] Activating field spell '{card.name}'")
+                    self.duel_bot_client.activate_spell_or_trap_from_hand(idx, CardPosition.Field)
+                    self.duel_bot_client.wait_for_input_enabled()
+                    return True
+                except Exception as e:
+                    self.logger.warning(f"[Field] Failed '{card.name}': {e}")
+
+            elif card.name == SUPER_POLY_NAME:
+                # Super Poly: activate only when opponent has >= 2 monsters, else set it
+                if opp_monster_count >= 2:
+                    try:
+                        board_fresh = self.duel_bot_client.get_board_state()
+                        free_st = self.duel_bot_client.get_free_spell_or_trap_card_zone(board_fresh)
+                        if not free_st:
+                            continue
+                        self.logger.info(f"[Super Poly] Activating (opp monsters={opp_monster_count})")
+                        self.duel_bot_client.activate_spell_or_trap_from_hand(idx, free_st)
+                        self._super_poly_cost_pending_until = time.time() + 12.0
+                        self._super_poly_stage = "discard"
+                        self.duel_bot_client.wait_for_input_enabled()
+                        return True
+                    except Exception as e:
+                        self.logger.warning(f"[Super Poly] Activate failed: {e}")
+                else:
+                    # Set it face-down for use on opponent's turn
+                    try:
+                        board_fresh = self.duel_bot_client.get_board_state()
+                        free_st = self.duel_bot_client.get_free_spell_or_trap_card_zone(board_fresh)
+                        if not free_st:
+                            continue
+                        self.logger.info(f"[Super Poly] Setting face-down (opp monsters={opp_monster_count})")
+                        self.duel_bot_client.set_spell_or_trap_from_hand(idx, free_st)
+                        self.duel_bot_client.wait_for_input_enabled()
+                        return True
+                    except Exception as e:
+                        self.logger.warning(f"[Super Poly] Set failed: {e}")
+
+            else:
+                # Normal spells and continuous spells: activate from hand
+                try:
+                    board_fresh = self.duel_bot_client.get_board_state()
+                    free_st = self.duel_bot_client.get_free_spell_or_trap_card_zone(board_fresh)
+                    if not free_st:
+                        self.logger.warning(f"[Spell] No free S/T zone for '{card.name}'")
+                        continue
+                    self.logger.info(f"[Spell] Activating '{card.name}' to {free_st.name}")
+                    self.duel_bot_client.activate_spell_or_trap_from_hand(idx, free_st)
+                    self.duel_bot_client.wait_for_input_enabled()
+                    # Handle post-activation dialogs
+                    if card.name == POT_OF_DUALITY_NAME:
+                        self._handle_pot_of_duality_dialog()
+                    elif card.name == POT_OF_EXTRAVAGANCE_NAME:
+                        self._handle_pot_of_extravagance_dialog()
+                    return True
+                except Exception as e:
+                    self.logger.warning(f"[Spell] Failed '{card.name}': {e}")
+
+        return False
+
     def play_turn(self):
         """
-        Repeatedly choose and execute the best available action until none remain
-        or the safety cap is reached. Each iteration refreshes board state so that
-        newly available actions (e.g. setting a trap after summoning a monster)
-        are always considered.
+        Play our Main Phase by iterating hand cards in priority order and executing
+        actions based on card type. Avoids relying on command_bits (which are only
+        populated when the game's command UI is active for a specific card).
         """
-        max_actions = 30
+        max_actions = 20
         actions_taken = 0
-        failed_actions: set = set()
-        consecutive_no_action = 0
+        normal_summon_done = False
 
         self._log_board_state_detail()
+        # Brief pause to let the game settle into Main Phase
+        time.sleep(0.3)
 
         while actions_taken < max_actions:
-            # --- Handle any pending multi-step prompts first ---
-            handled_prompt = (
-                self._handle_super_poly_discard_prompt()
-                or self._handle_super_poly_fusion_prompt()
-                or self._handle_super_poly_material_prompt()
-                or self._handle_faceup_position_prompt()
-                or self._handle_summon_zone_prompt()
-            )
-            if handled_prompt:
-                consecutive_no_action = 0
+            # Handle any pending multi-step Super Poly prompts first
+            if (self._handle_super_poly_discard_prompt()
+                    or self._handle_super_poly_fusion_prompt()
+                    or self._handle_super_poly_material_prompt()
+                    or self._handle_faceup_position_prompt()
+                    or self._handle_summon_zone_prompt()):
                 continue
 
-            self._log_prompt_if_inputting()
-
-            # --- Collect available actions ---
             try:
-                valid_raw = self._get_all_valid_actions()
+                board_state = self.duel_bot_client.get_board_state()
+                my_state = board_state.player_card_states[Player.Myself]
             except Exception as e:
-                self.logger.warning(f"[Turn] get_all_valid_actions error: {e}")
+                self.logger.warning(f"[Turn] Board read error: {e}")
                 time.sleep(0.5)
-                continue
+                break
 
-            valid = self._filter_set_duplicates(valid_raw)
-            valid = [
-                a for a in valid
-                if (a["card_name"], a["command_type"], a["index"], a["position"]) not in failed_actions
-            ]
+            result = self._try_play_card_from_hand(board_state, my_state, normal_summon_done)
 
-            best = self._choose_best_action(valid)
-
-            if best is None:
-                # No action chosen — handle any remaining prompts then break
-                if self.duel_bot_client.is_inputting():
-                    handled = (
-                        self._handle_super_poly_discard_prompt()
-                        or self._handle_super_poly_fusion_prompt()
-                        or self._handle_super_poly_material_prompt()
-                        or self._handle_faceup_position_prompt()
-                        or self._handle_summon_zone_prompt()
-                        or self._handle_unending_nightmare_prompt()
-                    )
-                    if handled:
-                        consecutive_no_action = 0
-                        continue
-                    self.logger.info("[Turn] No action — cancelling dialog.")
-                    self.duel_bot_client.cancel_activation_prompts()
-                    time.sleep(0.3)
-
-                consecutive_no_action += 1
-                if consecutive_no_action >= 2:
-                    self.logger.info("[Turn] No more playable actions. Ending turn.")
-                    break
-                # Give the game one more chance to present new options
+            if result == "summon":
+                normal_summon_done = True
+                actions_taken += 1
+                self.logger.info(f"[Turn] Actions taken: {actions_taken}")
                 time.sleep(0.4)
-                continue
-
-            consecutive_no_action = 0
-
-            if self._execute_action(best) is False:
-                failed_actions.add((best["card_name"], best["command_type"], best["index"], best["position"]))
-                self.logger.warning(f"[Turn] Action failed, blacklisting: {best['action_name']} on {best['card_name']}")
-                continue
-
-            # Handle post-activation dialogs immediately
-            if best["card_name"] == POT_OF_DUALITY_NAME:
-                self._handle_pot_of_duality_dialog()
-            elif best["card_name"] == POT_OF_EXTRAVAGANCE_NAME:
-                self._handle_pot_of_extravagance_dialog()
-
-            actions_taken += 1
-            self.logger.info(f"[Turn] Actions taken: {actions_taken}")
-
-            # Brief pause to let animations finish before querying the board again
-            time.sleep(0.4)
-            self._log_prompt_if_inputting()
-
-            # Only cancel lingering activation prompts — not the turn itself
-            if self.duel_bot_client.is_inputting():
-                top_player, _, _ = self._get_response_context()
-                if top_player != Player.Opponent:
-                    self.duel_bot_client.cancel_activation_prompts()
+            elif result:
+                actions_taken += 1
+                self.logger.info(f"[Turn] Actions taken: {actions_taken}")
+                time.sleep(0.4)
+            else:
+                self.logger.info("[Turn] No more playable actions. Ending turn.")
+                break
 
         self.logger.info(f"[Turn] Complete. Total actions: {actions_taken}")
 
