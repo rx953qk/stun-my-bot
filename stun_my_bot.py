@@ -18,6 +18,7 @@ from jduel_bot.jduel_bot_enums import (
     DialogButtonType,
     CardFace,
     CardTurn,
+    DuelLogViewType,
 )
 from jduel_bot.jduel_bot_handler import JDuelBotHandler
 from jduel_bot.jduel_bot_logger import LoggerManager, get_log_path
@@ -153,8 +154,10 @@ class LockdownStunBotHandler(JDuelBotHandler):
     def _handle_my_turn(self, phase):
         if phase == Phase.Null:
             try:
-                if self.duel_bot_client.is_inputting():
-                    self.logger.info("[Setup] Null phase + input detected -> clicking 'Go First'")
+                duel_log = self.duel_bot_client.get_duel_log()
+                last_event = duel_log[-1] if duel_log else None
+                if last_event in (DuelLogViewType.RunCoin, DuelLogViewType.RunJanken):
+                    self.logger.info(f"[Setup] Coin toss detected ({last_event.name}) -> clicking 'Go First'")
                     self.duel_bot_client.simulate_click(_GO_FIRST_COORD)
                     time.sleep(0.5)
             except Exception as e:
