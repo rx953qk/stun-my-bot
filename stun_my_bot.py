@@ -149,6 +149,19 @@ class LockdownStunBotHandler(JDuelBotHandler):
             self.logger.warning(f"[Setup] while_not_dueling error: {e}")
         self._went_first = None  # reset for next duel
 
+    # ===== Null phase: coin toss prompt =====
+    def _handle_my_turn(self, phase):
+        if phase == Phase.Null:
+            try:
+                if self.duel_bot_client.is_inputting():
+                    self.logger.info("[Setup] Null phase + input detected -> clicking 'Go First'")
+                    self.duel_bot_client.simulate_click(_GO_FIRST_COORD)
+                    time.sleep(0.5)
+            except Exception as e:
+                self.logger.warning(f"[Setup] Null phase error: {e}")
+        else:
+            super()._handle_my_turn(phase)
+
     # ===== Draw phase =====
     def handle_my_draw_phase(self):
         """Override: log the turn, then let the base class draw."""
