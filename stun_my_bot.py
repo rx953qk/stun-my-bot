@@ -1191,6 +1191,9 @@ class LockdownStunBotHandler(JDuelBotHandler):
         hand_cards = [
             (i, c) for i, c in enumerate(my_state.hand) if c and getattr(c, "name", None)
         ]
+        self.logger.info(
+            f"[Hand] {len(hand_cards)} card(s): {[c.name for _, c in hand_cards]}"
+        )
 
         # ---- 1. Normal summon: attempt once per turn ----
         if not normal_summon_done:
@@ -1237,6 +1240,10 @@ class LockdownStunBotHandler(JDuelBotHandler):
             and c.name not in NEVER_SET_FROM_HAND
         ]
         spell_trap_candidates.sort(key=lambda ic: -HAND_PRIORITY.get(ic[1].name, 0))
+        self.logger.info(
+            f"[ST] {len(spell_trap_candidates)} S/T candidate(s): "
+            f"{[c.name for _, c in spell_trap_candidates]}"
+        )
 
         for idx, card in spell_trap_candidates:
             card_type = str(getattr(card, "type", "") or "")
