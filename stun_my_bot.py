@@ -109,6 +109,14 @@ POT_OF_EXTRAVAGANCE_NAME = "Pot of Extravagance"
 UNENDING_NIGHTMARE_NAME = "Unending Nightmare"
 SUPER_POLY_NAME = "Super Polymerization"
 
+_ST_ZONE_PREFERENCE = [
+    CardPosition.MagicC,
+    CardPosition.MagicR,
+    CardPosition.MagicL,
+    CardPosition.MagicRR,
+    CardPosition.MagicLL,
+]
+
 # Coordinates for common prompts (1280x720)
 # YES/NO generic dialog
 _YES_COORD = Coordinates(741, 425)
@@ -971,6 +979,20 @@ class LockdownStunBotHandler(JDuelBotHandler):
             self.logger.warning(f"Execute action failed: {e}")
             return False
 
+    def _pick_free_st_zone(self, board_state, used_st_zones: set) -> CardPosition | None:
+        """Return first free S/T zone not already placed this turn.
+
+        Face-down cards set this turn may appear as None in the board snapshot,
+        so we combine the board's occupancy check with a local used-zones guard.
+        """
+        slots = board_state.player_card_states[Player.Myself].spells_and_traps
+        base = int(CardPosition.Magic)
+        for zone in _ST_ZONE_PREFERENCE:
+            idx = int(zone) - base
+            if 0 <= idx < len(slots) and slots[idx] is None and zone not in used_st_zones:
+                return zone
+        return None
+
     def _log_board_state_detail(self):
         try:
             board = self.duel_bot_client.get_board_state()
@@ -1140,7 +1162,7 @@ class LockdownStunBotHandler(JDuelBotHandler):
 
     # ===== Main turn logic =====
 
-    def _try_play_card_from_hand(self, board_state, my_state, normal_summon_done: bool, played_names: set | None = None):
+    def _try_play_card_from_hand(self, board_state, my_state, normal_summon_done: bool, played_names: set | None = None, used_st_zones: set | None = None):
         """
         Attempt to play the highest-priority card from hand based on card type.
         Does NOT rely on command_bits (which are only populated when the game's
@@ -1162,6 +1184,8 @@ class LockdownStunBotHandler(JDuelBotHandler):
 
         if played_names is None:
             played_names = set()
+        if used_st_zones is None:
+            used_st_zones = set()
 
         # Build hand list with priority score
         hand_cards = [
@@ -1248,7 +1272,7 @@ class LockdownStunBotHandler(JDuelBotHandler):
                 # All traps are set face-down during our main phase
                 try:
                     board_fresh = self.duel_bot_client.get_board_state()
-                    free_st = self.duel_bot_client.get_free_spell_or_trap_card_zone(board_fresh)
+                    free_st = self._pick_free_st_zone(board_fresh, used_st_zones)
                     if not free_st:
                         self.logger.warning(f"[Set] No free S/T zone for '{card.name}'")
                         continue
@@ -1256,6 +1280,7 @@ class LockdownStunBotHandler(JDuelBotHandler):
                     self.duel_bot_client.set_spell_or_trap_from_hand(idx, free_st)
                     self.duel_bot_client.wait_for_input_enabled()
                     played_names.add(card.name)
+                    used_st_zones.add(free_st)
                     return True
                 except Exception as e:
                     self.logger.warning(f"[Set] Failed '{card.name}': {e}")
@@ -1292,13 +1317,14 @@ class LockdownStunBotHandler(JDuelBotHandler):
                     # Set it face-down for use on opponent's turn
                     try:
                         board_fresh = self.duel_bot_client.get_board_state()
-                        free_st = self.duel_bot_client.get_free_spell_or_trap_card_zone(board_fresh)
+                        free_st = self._pick_free_st_zone(board_fresh, used_st_zones)
                         if not free_st:
                             continue
                         self.logger.info(f"[Super Poly] Setting face-down (opp monsters={opp_monster_count})")
                         self.duel_bot_client.set_spell_or_trap_from_hand(idx, free_st)
                         self.duel_bot_client.wait_for_input_enabled()
                         played_names.add(card.name)
+                        used_st_zones.add(free_st)
                         return True
                     except Exception as e:
                         self.logger.warning(f"[Super Poly] Set failed: {e}")
@@ -1336,6 +1362,7 @@ class LockdownStunBotHandler(JDuelBotHandler):
         actions_taken = 0
         normal_summon_done = False
         played_names: set[str] = set()
+        used_st_zones: set[CardPosition] = set()
 
         self._log_board_state_detail()
         # Brief pause to let the game settle into Main Phase
@@ -1358,7 +1385,7 @@ class LockdownStunBotHandler(JDuelBotHandler):
                 time.sleep(0.5)
                 break
 
-            result = self._try_play_card_from_hand(board_state, my_state, normal_summon_done, played_names)
+            result = self._try_play_card_from_hand(board_state, my_state, normal_summon_done, played_names, used_st_zones)
 
             if result == "summon":
                 normal_summon_done = True
